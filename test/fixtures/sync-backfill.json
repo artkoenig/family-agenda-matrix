@@ -1,0 +1,68 @@
+{
+  "next_batch": "s72640_4512_1934_6623_6611_1_76_119_0_3",
+  "rooms": {
+    "join": {
+      "!nEwClubRoomFussball:family-agenda.local": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "state_key": "",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": { "name": "FC Eltern U11" },
+              "event_id": "$ClubRoomName000000000000000000000000000009",
+              "origin_server_ts": 1789370200000
+            },
+            {
+              "type": "m.bridge",
+              "state_key": "family-agenda.local/whatsapp",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": {
+                "bridgebot": "@whatsappbot:family-agenda.local",
+                "channel": { "id": "120363408179389935@g.us", "displayname": "FC Eltern U11" }
+              },
+              "event_id": "$ClubBridgeInfo00000000000000000000000000013",
+              "origin_server_ts": 1789370200000
+            },
+            {
+              "type": "m.room.member",
+              "state_key": "@whatsapp_4917055566677:family-agenda.local",
+              "sender": "@whatsapp_4917055566677:family-agenda.local",
+              "content": { "membership": "join", "displayname": "Trainer Klaus (WA)" },
+              "event_id": "$ClubTrainerMember00000000000000000000000010",
+              "origin_server_ts": 1789370200500
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4917055566677:family-agenda.local",
+              "content": {
+                "msgtype": "m.text",
+                "body": "Training am Dienstag fällt aus, Platz gesperrt.",
+                "fi.mau.whatsapp.backfill": true
+              },
+              "event_id": "$BackfillTrainingDienstagFaelltAus000000011",
+              "origin_server_ts": 1789200000000,
+              "unsigned": { "age": 170200000 }
+            },
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4917055566677:family-agenda.local",
+              "content": { "msgtype": "m.text", "body": "Samstag Turnier in Musterstadt, Abfahrt 9 Uhr.", "fi.mau.whatsapp.backfill": true },
+              "event_id": "$BackfillTurnierSamstagMusterstadt00000012",
+              "origin_server_ts": 1789280000000,
+              "unsigned": { "age": 90200000 }
+            }
+          ],
+          "limited": false,
+          "prev_batch": "t50-72630_4512_1934_6623_6611_1_76_119_0_3"
+        }
+      }
+    },
+    "invite": {},
+    "leave": {}
+  }
+}

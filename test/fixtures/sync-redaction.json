@@ -1,0 +1,41 @@
+{
+  "next_batch": "s72601_4490_1934_6623_6611_1_76_119_0_3",
+  "rooms": {
+    "join": {
+      "!kTWfeGdLqDbHpZoRsX:family-agenda.local": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.redaction",
+              "sender": "@whatsapp_4917612345678:family-agenda.local",
+              "content": { "redacts": "$WnDtrip5bfriday0aTreffpunktSchultor8Uhr0001", "reason": "Deleted for everyone" },
+              "redacts": "$WnDtrip5bfriday0aTreffpunktSchultor8Uhr0001",
+              "event_id": "$RedactWandertagDeletedForEveryone0000007",
+              "origin_server_ts": 1789370000000,
+              "unsigned": { "age": 120 }
+            }
+          ],
+          "limited": false,
+          "prev_batch": "t40-72596_4490_1934_6623_6611_1_76_119_0_3"
+        }
+      },
+      "!aBcPrivatFamilieChat:family-agenda.local": {
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.redaction",
+              "sender": "@whatsapp_4930111222333:family-agenda.local",
+              "content": { "redacts": "$PrivateOmaKaffeeSonntag00000000000000006" },
+              "event_id": "$RedactPrivateOma0000000000000000000000008",
+              "origin_server_ts": 1789370100000
+            }
+          ],
+          "limited": false,
+          "prev_batch": "t41-72597_4490_1934_6623_6611_1_76_119_0_3"
+        }
+      }
+    },
+    "invite": {},
+    "leave": {}
+  }
+}

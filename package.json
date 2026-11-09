@@ -1,0 +1,28 @@
+{
+  "name": "family-agenda-matrix",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Matrix Source Type of Family Agenda as a singleton plugin container, with Synapse and one bridge per Messenger as companions.",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@12.17.0",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "@family-agenda/plugin-contract": "github:artkoenig/family-agenda#4e40c4ec80260c05c763f4a04c9c60633e982f91&path:/packages/plugin-contract",
+    "@family-agenda/plugin-kit": "github:artkoenig/family-agenda#4e40c4ec80260c05c763f4a04c9c60633e982f91&path:/packages/plugin-kit",
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}
