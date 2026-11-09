@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver", "docker:pinDigests"],
+  "timezone": "Europe/Berlin",
+  "prConcurrentLimit": 1,
+  "minimumReleaseAge": "3 days",
+  "minimumReleaseAgeBehaviour": "timestamp-optional",
+  "separateMajorMinor": false,
+  "logLevelRemap": [
+    {
+      "description": "Expected with timestamp-optional (pinDigest updates have no release timestamp); do not show it as a repository problem",
+      "matchMessage": "/Some .+ did not have a releaseTimestamp, but as we're running with minimumReleaseAgeBehaviour=timestamp-optional, proceeding/",
+      "newLogLevel": "info"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Same limit as in family-agenda, whose plugin-kit these plugins build against",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Pinned to a commit of family-agenda on purpose: the plugin contract changes only by a deliberate bump",
+      "matchPackageNames": ["@family-agenda/plugin-contract", "@family-agenda/plugin-kit"],
+      "enabled": false
+    },
+    {
+      "description": "One PR with every update (all managers, all update types)",
+      "matchPackageNames": ["*"],
+      "groupName": "all dependencies"
+    }
+  ]
+}
