@@ -1,0 +1,180 @@
+{
+  "next_batch": "s72595_4483_1934_6623_6611_1_76_119_0_3",
+  "rooms": {
+    "join": {
+      "!kTWfeGdLqDbHpZoRsX:family-agenda.local": {
+        "summary": { "m.joined_member_count": 4, "m.invited_member_count": 0 },
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "state_key": "",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": { "name": "Klasse 5b Eltern" },
+              "event_id": "$9RkqVdXwJzgW0cOuX1iHfT3xGbSt8KYq4mN2LpEaRvc",
+              "origin_server_ts": 1789369200000,
+              "unsigned": { "age": 2073600000 }
+            },
+            {
+              "type": "m.bridge",
+              "state_key": "family-agenda.local/whatsapp",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": {
+                "bridgebot": "@whatsappbot:family-agenda.local",
+                "channel": { "id": "120363187638819327@g.us", "displayname": "Klasse 5b Eltern" }
+              },
+              "event_id": "$KlasseBridgeInfo00000000000000000000000011",
+              "origin_server_ts": 1789369200000,
+              "unsigned": { "age": 2073600000 }
+            },
+            {
+              "type": "m.room.member",
+              "state_key": "@whatsapp_4917612345678:family-agenda.local",
+              "sender": "@whatsapp_4917612345678:family-agenda.local",
+              "content": { "membership": "join", "displayname": "Frau Berger (WA)" },
+              "event_id": "$Jw3oZcUbSy8hQd1eRtGkPf5nXlV7aMiY2uKxEqNjBzs",
+              "origin_server_ts": 1789369201000,
+              "unsigned": { "age": 2073599000 }
+            },
+            {
+              "type": "m.room.member",
+              "state_key": "@whatsapp_4915198765432:family-agenda.local",
+              "sender": "@whatsapp_4915198765432:family-agenda.local",
+              "content": { "membership": "join", "displayname": "Jonas' Papa (WA)" },
+              "event_id": "$Lq4pAdVcTz9iRe2fSuHlQg6oYmW8bNjZ3vLyFrOkCat",
+              "origin_server_ts": 1789369202000,
+              "unsigned": { "age": 2073598000 }
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4917612345678:family-agenda.local",
+              "content": {
+                "msgtype": "m.text",
+                "body": "Liebe Eltern, am Freitag, 18.09., ist Wandertag. Treffpunkt 8:00 Uhr am Schultor.",
+                "m.mentions": {}
+              },
+              "event_id": "$WnDtrip5bfriday0aTreffpunktSchultor8Uhr0001",
+              "origin_server_ts": 1789366320000,
+              "unsigned": { "age": 2400 }
+            },
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4917612345678:family-agenda.local",
+              "content": {
+                "msgtype": "m.file",
+                "body": "Hier die Einverständniserklärung, bitte bis Mittwoch zurück.",
+                "filename": "einverstaendnis.pdf",
+                "info": { "mimetype": "application/pdf", "size": 9 },
+                "url": "{{pdf}}",
+                "m.mentions": {}
+              },
+              "event_id": "$PdFeinverstaendniserklaerungMittwoch000002",
+              "origin_server_ts": 1789366380000,
+              "unsigned": { "age": 2300 }
+            },
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4915198765432:family-agenda.local",
+              "content": {
+                "msgtype": "m.text",
+                "body": "Danke! Muss Jonas etwas mitbringen?",
+                "m.relates_to": { "m.in_reply_to": { "event_id": "$WnDtrip5bfriday0aTreffpunktSchultor8Uhr0001" } },
+                "m.mentions": { "user_ids": ["@whatsapp_4917612345678:family-agenda.local"] }
+              },
+              "event_id": "$ReplyJonasPapaMitbringen0000000000000003",
+              "origin_server_ts": 1789366500000,
+              "unsigned": { "age": 2100 }
+            },
+            {
+              "type": "m.room.message",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": { "msgtype": "m.notice", "body": "Disappearing messages are now off." },
+              "event_id": "$BotNoticeDisappearingOff000000000000000004",
+              "origin_server_ts": 1789366510000,
+              "unsigned": { "age": 2000 }
+            }
+          ],
+          "limited": false,
+          "prev_batch": "t34-72590_4483_1934_6623_6611_1_76_119_0_3"
+        },
+        "ephemeral": { "events": [] },
+        "account_data": { "events": [] },
+        "unread_notifications": { "notification_count": 4, "highlight_count": 0 }
+      },
+      "!aBcPrivatFamilieChat:family-agenda.local": {
+        "state": {
+          "events": [
+            {
+              "type": "m.room.name",
+              "state_key": "",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": { "name": "Oma (WA)" },
+              "event_id": "$PrivateRoomNameOma000000000000000000000005",
+              "origin_server_ts": 1789369200000
+            },
+            {
+              "type": "m.bridge",
+              "state_key": "family-agenda.local/whatsapp",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": {
+                "bridgebot": "@whatsappbot:family-agenda.local",
+                "channel": { "id": "246161839526082@lid" },
+                "com.beeper.room_type": "dm"
+              },
+              "event_id": "$OmaBridgeInfo000000000000000000000000000012",
+              "origin_server_ts": 1789369200000
+            }
+          ]
+        },
+        "timeline": {
+          "events": [
+            {
+              "type": "m.room.message",
+              "sender": "@whatsapp_4930111222333:family-agenda.local",
+              "content": { "msgtype": "m.text", "body": "Kommt ihr Sonntag zum Kaffee?" },
+              "event_id": "$PrivateOmaKaffeeSonntag00000000000000006",
+              "origin_server_ts": 1789366600000
+            }
+          ],
+          "limited": false,
+          "prev_batch": "t35-72591_4483_1934_6623_6611_1_76_119_0_3"
+        }
+      }
+    },
+    "invite": {
+      "!nEwClubRoomFussball:family-agenda.local": {
+        "invite_state": {
+          "events": [
+            { "type": "m.room.name", "state_key": "", "sender": "@whatsappbot:family-agenda.local", "content": { "name": "FC Eltern U11" } },
+            {
+              "type": "m.room.member",
+              "state_key": "{{user}}",
+              "sender": "@whatsappbot:family-agenda.local",
+              "content": { "membership": "invite", "displayname": "{{user}}" }
+            }
+          ]
+        }
+      },
+      "!sTrangerSpamRoom:evil.example": {
+        "invite_state": {
+          "events": [
+            {
+              "type": "m.room.member",
+              "state_key": "{{user}}",
+              "sender": "@whatsapp_4917612345678:evil.example",
+              "content": { "membership": "invite" }
+            }
+          ]
+        }
+      }
+    },
+    "leave": {}
+  },
+  "presence": { "events": [] },
+  "account_data": { "events": [] },
+  "device_one_time_keys_count": { "signed_curve25519": 0 }
+}

@@ -1,0 +1,37 @@
+# The Matrix plugin in a Family Agenda plugins.yml (see docs/configuration.md of Family Agenda).
+# Each container gets the private network of the plugin and its own egress allowlist. The plugin
+# writes the configuration of Synapse and the bridges into the `config` volume and creates
+# `/config/ready` last; the companions wait for it, then start from it.
+plugins:
+  - id: matrix
+    image: ghcr.io/artkoenig/family-agenda-matrix:0.1.0
+    # No egress: the plugin talks only to its companions.
+    volumes:
+      config: /config
+    companions:
+      # The homeserver: no federation, no registration; its database is a C-collation Postgres
+      # database of the core's server (DATABASE_URL), its media stay in the `synapse` volume.
+      - name: synapse
+        image: matrixdotorg/synapse:v1.163.2
+        database: true
+        volumes:
+          config: /config
+          synapse: /data
+        command: ["sh", "-c", "until [ -f /config/ready ]; do sleep 1; done; exec sh /config/synapse/start.sh"]
+        healthcheck:
+          test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+          interval: 15s
+          timeout: 5s
+          retries: 3
+      # One bridge per Messenger, named after its Messenger id. Its session stays in its own volume;
+      # it reaches the Messenger through the egress proxy in HTTPS_PROXY.
+      - name: whatsapp
+        image: dock.mau.dev/mautrix/whatsapp:v0.2610.0
+        volumes:
+          config: /config
+          whatsapp: /data
+        command: ["sh", "-c", "until [ -f /config/ready ]; do sleep 1; done; exec sh /config/whatsapp/start.sh"]
+        egress:
+          - "*.whatsapp.net:443"
+          - "*.whatsapp.com:443"
+          - web.whatsapp.com:443
