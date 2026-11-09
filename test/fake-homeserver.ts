@@ -49,6 +49,10 @@ export class FakeHomeserver {
   private qrCodes = 0;
   /** Whether the WhatsApp bridge runs; when it does not, its address does not answer. */
   bridgeRunning = true;
+  /** Whether media are sent in chunks, without a content-length, as a proxy may. */
+  streamMedia = false;
+  /** Instructions of a login step the bridge answers with instead of a QR code, such as one asking for a phone number. */
+  otherLoginStep: string | null = null;
   /** How many more joins the homeserver refuses as rate limited, as Synapse does past its burst. */
   limitedJoins = 0;
 
@@ -479,7 +483,13 @@ export class FakeHomeserver {
       return;
     }
     response.writeHead(200, { "content-type": "application/octet-stream" });
-    response.end(Buffer.from(bytes));
+    if (!this.streamMedia) {
+      response.end(Buffer.from(bytes));
+      return;
+    }
+    const half = Math.ceil(bytes.length / 2);
+    response.write(Buffer.from(bytes.subarray(0, half)));
+    response.end(Buffer.from(bytes.subarray(half)));
   }
   private provision(request: IncomingMessage, response: ServerResponse, url: URL, method: string): void {
     if (request.headers.authorization !== `Bearer ${this.provisioningSecret}`) {
@@ -510,7 +520,12 @@ export class FakeHomeserver {
   private provisionLogin(method: string, path: string, userId: string, response: ServerResponse): boolean {
     if (method !== "POST") return false;
     if (path === "/login/start/qr") {
-      respond(response, 200, this.qrStep(`login-${randomBytes(4).toString("hex")}`));
+      const loginId = `login-${randomBytes(4).toString("hex")}`;
+      if (this.otherLoginStep !== null) {
+        respond(response, 200, { login_id: loginId, type: "user_input", step_id: "fi.mau.whatsapp.phone", instructions: this.otherLoginStep });
+        return true;
+      }
+      respond(response, 200, this.qrStep(loginId));
       return true;
     }
     const step = /^\/login\/step\/([^/]+)\/([^/]+)\/display_and_wait$/.exec(path);

@@ -30,15 +30,15 @@ export type SyncResponse = {
   };
 };
 
-/** What the homeserver answered with when a request failed. */
-export class HomeserverError extends Error {
+/** What the homeserver or a bridge answered with when it refused a request. */
+export class RefusedError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly errcode: string | null,
   ) {
     super(message);
-    this.name = "HomeserverError";
+    this.name = "RefusedError";
   }
 }
 
@@ -151,8 +151,7 @@ export function homeserverClient(options: HomeserverOptions) {
         { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeoutMs) },
       );
       if (!response.ok) return null;
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      return bytes.byteLength > maximumBytes ? null : bytes;
+      return bodyWithin(response, maximumBytes);
     },
 
     async logout(token: string): Promise<void> {
@@ -162,6 +161,29 @@ export function homeserverClient(options: HomeserverOptions) {
 }
 
 export type HomeserverClient = ReturnType<typeof homeserverClient>;
+
+/**
+ * A response's body, or null when it is larger than `maximumBytes`: refused by its
+ * content-length up front, or cut off as soon as it streams past the limit.
+ */
+async function bodyWithin(response: Response, maximumBytes: number): Promise<Uint8Array | null> {
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (declared > maximumBytes || !response.body) {
+    await response.body?.cancel();
+    return declared > maximumBytes ? null : new Uint8Array();
+  }
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for await (const chunk of response.body) {
+    length += chunk.byteLength;
+    if (length > maximumBytes) {
+      await response.body.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, length);
+}
 
 /** The state of a login as a bridge reports it, such as `CONNECTED` or `LOGGED_OUT`. */
 export type BridgeLogin = { id: string; name: string; stateEvent: string; reason: string | null };
@@ -248,12 +270,12 @@ function qrOf(display: RawStep["display_and_wait"]): string | null {
   return display?.type === "qr" ? (display.data ?? null) : null;
 }
 
-async function errorOf(response: Response): Promise<HomeserverError> {
+async function errorOf(response: Response): Promise<RefusedError> {
   let body: { errcode?: string; error?: string } = {};
   try {
     body = (await response.json()) as typeof body;
   } catch {
     // Not every error comes with a Matrix error body.
   }
-  return new HomeserverError(body.error ?? `HTTP ${response.status}`, response.status, body.errcode ?? null);
+  return new RefusedError(body.error ?? `HTTP ${response.status}`, response.status, body.errcode ?? null);
 }

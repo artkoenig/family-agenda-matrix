@@ -10,12 +10,12 @@ AGPLv3 (`LICENSE`). Contributions are licensed inbound as outbound under the [De
 
 Add it to the `plugins.yml` of a Family Agenda Instance as in [`plugins.example.yml`](plugins.example.yml): the plugin, Synapse and one bridge per Messenger (WhatsApp so far) as companions. Pin every image.
 
-- The plugin writes the configuration and secrets of Synapse and the bridges into the shared `config` volume when it starts, and keeps them on later starts. The companions wait for `/config/ready`.
+- The plugin keeps the secrets in its own volume, which no companion mounts, and writes each companion's configuration into a volume shared with that companion alone, so a bridge never reads Synapse's secrets. It keeps the secrets on later starts, writing them atomically; a corrupt `secrets.json` stops the plugin instead of being replaced. Each companion waits up to five minutes for `/config/ready` in its volume.
 - Synapse has federation and registration off; the plugin creates one Matrix user per Source with the registration shared secret. Its database comes from `database: true`.
 - Each bridge reaches its Messenger only through the egress proxy; the plugin itself has no egress.
-- A Messenger whose companion is missing is listed as not installed; while it starts, a run is a temporary error and the login step waits.
+- A Messenger whose companion is missing is listed as not installed; while it starts, a run is a temporary error and the login step waits. A companion that has not answered for ten minutes, or a Synapse that refuses the shared secret, is a definite error.
 - Removing a Source logs its account out of the bridge.
-- Errors reach the core with generic messages only; the details are logged.
+- Errors reach the core with generic messages only; the details, and texts of the bridge such as a logout reason, are logged.
 
 ## Development
 

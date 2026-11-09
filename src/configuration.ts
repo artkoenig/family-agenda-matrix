@@ -1,11 +1,16 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MatrixInstance } from "./instance";
+import { messengerOf, type Messenger } from "./messengers";
 
 /** Where the plugin writes the companions' configuration, and how the plugin and the companions reach each other. */
 export type MatrixLayout = {
-  /** The volume shared with the companions, such as `/config`: their configuration and the secrets. */
+  /**
+   * The plugin's own volume, such as `/config`, which holds the secrets. Each companion's
+   * configuration is in a subdirectory, `synapse` or `whatsapp`, which is a volume of its own
+   * shared with that companion alone: no companion reads the secrets of another.
+   */
   configDirectory: string;
   /** The name in the homeserver's user ids; it never leaves the Instance. */
   serverName: string;
@@ -15,7 +20,7 @@ export type MatrixLayout = {
   bridgeUrls: { whatsapp: string };
 };
 
-/** The secrets generated on the first start and kept in the shared volume. */
+/** The secrets generated on the first start and kept in the plugin's own volume. */
 export type MatrixSecrets = {
   registrationSharedSecret: string;
   macaroonSecretKey: string;
@@ -30,55 +35,99 @@ const secret = () => randomBytes(32).toString("base64url");
 /** Where each companion keeps its own data, in a volume of its own: Synapse's media, the bridge's session. */
 const dataDirectory = "/data";
 
-/** The paths of the files the plugin writes into the shared volume. */
+/** Where a companion sees its own configuration volume: `start.sh`, `ready` and its files. */
+const companionConfigDirectory = "/config";
+
+/**
+ * The paths of the files the plugin writes: the secrets, and each companion's configuration
+ * volume, into which `ready` is written last: the companion waits for it before it starts.
+ */
 export function pathsOf(layout: MatrixLayout) {
   const synapse = join(layout.configDirectory, "synapse");
   const whatsapp = join(layout.configDirectory, "whatsapp");
   return {
     secrets: join(layout.configDirectory, "secrets.json"),
-    /** Written last: the companions wait for it before they start. */
-    ready: join(layout.configDirectory, "ready"),
-    synapse: { directory: synapse, config: join(synapse, "homeserver.yaml"), start: join(synapse, "start.sh") },
-    whatsapp: { directory: whatsapp, config: join(whatsapp, "config.yaml"), registration: join(whatsapp, "registration.yaml"), start: join(whatsapp, "start.sh") },
+    synapse: { directory: synapse, config: join(synapse, "homeserver.yaml"), start: join(synapse, "start.sh"), ready: join(synapse, "ready") },
+    whatsapp: {
+      directory: whatsapp,
+      config: join(whatsapp, "config.yaml"),
+      registration: join(whatsapp, "registration.yaml"),
+      start: join(whatsapp, "start.sh"),
+      ready: join(whatsapp, "ready"),
+    },
   };
 }
 
-/** The secrets of the shared volume, generated where missing and kept from then on. */
+/**
+ * The secrets of the plugin's volume, generated on the first start and kept from then on. A file
+ * that cannot be read, or lacks one of the secrets, fails the start: replacing it would lock the
+ * Sources out of their Matrix users and the bridge out of the homeserver.
+ */
 export async function secretsOf(layout: MatrixLayout): Promise<MatrixSecrets> {
   const file = pathsOf(layout).secrets;
   await mkdir(layout.configDirectory, { recursive: true });
-  const stored = await readJson<Partial<MatrixSecrets>>(file);
+  const text = await readIfExists(file);
+  const stored = text === null ? null : parseSecrets(text, file);
   const secrets: MatrixSecrets = {
     registrationSharedSecret: stored?.registrationSharedSecret ?? secret(),
     macaroonSecretKey: stored?.macaroonSecretKey ?? secret(),
     formSecret: stored?.formSecret ?? secret(),
-    bridges: {
-      whatsapp: stored?.bridges?.whatsapp ?? {
-        asToken: secret(),
-        hsToken: secret(),
-        senderLocalpart: `bridge-${randomBytes(8).toString("hex")}`,
-        provisioningSecret: secret(),
-      },
-    },
+    // A Messenger added in a later version gets its bridge's secrets then.
+    bridges: { whatsapp: stored?.bridges.whatsapp ?? bridgeSecrets() },
   };
-  await write(file, `${JSON.stringify(secrets, null, 2)}\n`);
+  if (stored?.bridges.whatsapp === undefined) await write(file, `${JSON.stringify(secrets, null, 2)}\n`);
   return secrets;
 }
 
+function bridgeSecrets(): BridgeSecrets {
+  return { asToken: secret(), hsToken: secret(), senderLocalpart: `bridge-${randomBytes(8).toString("hex")}`, provisioningSecret: secret() };
+}
+
+type StoredSecrets = Omit<MatrixSecrets, "bridges"> & { bridges: Partial<MatrixSecrets["bridges"]> };
+
+/** The stored secrets, or an error naming the file when it is corrupt or incomplete. */
+function parseSecrets(text: string, file: string): StoredSecrets {
+  const corrupt = (why: string) =>
+    new Error(`${file} is corrupt (${why}). Restore it from a backup; deleting it makes new secrets, which lock out every Matrix Source.`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw corrupt("not JSON");
+  }
+  if (!isRecord(parsed)) throw corrupt("not an object");
+  for (const key of ["registrationSharedSecret", "macaroonSecretKey", "formSecret"]) {
+    if (!isSecret(parsed[key])) throw corrupt(`no ${key}`);
+  }
+  const bridges = parsed.bridges;
+  if (!isRecord(bridges)) throw corrupt("no bridges");
+  for (const [id, bridge] of Object.entries(bridges)) {
+    if (!isRecord(bridge) || !["asToken", "hsToken", "senderLocalpart", "provisioningSecret"].every((key) => isSecret(bridge[key]))) {
+      throw corrupt(`incomplete secrets of the ${id} bridge`);
+    }
+  }
+  return parsed as StoredSecrets;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const isSecret = (value: unknown) => typeof value === "string" && value.length > 0;
+
 /**
- * Writes the configuration and the start scripts of Synapse and the bridges into the shared
- * volume, then the `ready` file the companions wait for, and returns how the plugin reaches them.
+ * Writes the configuration and the start script of Synapse and of each bridge into that companion's
+ * volume, then the `ready` file it waits for, and returns how the plugin reaches them.
  * The files are written anew on every start, so that an update of the plugin brings its settings
  * along; the secrets and Synapse's signing key are kept.
  */
 export async function writeConfiguration(layout: MatrixLayout): Promise<MatrixInstance> {
   const paths = pathsOf(layout);
-  await rm(paths.ready, { force: true });
+  for (const companion of [paths.synapse, paths.whatsapp]) {
+    await mkdir(companion.directory, { recursive: true });
+    await rm(companion.ready, { force: true });
+  }
   const secrets = await secretsOf(layout);
-  for (const directory of [paths.synapse.directory, paths.whatsapp.directory]) await mkdir(directory, { recursive: true });
 
   const signingKey = join(paths.synapse.directory, "signing.key");
-  if ((await readFile(signingKey, "utf8").catch(() => null)) === null) {
+  if ((await readIfExists(signingKey)) === null) {
     await write(signingKey, `ed25519 a_${randomBytes(2).toString("hex")} ${signingSeed()}\n`);
   }
   const registrationText = registration(layout.serverName, layout.bridgeUrls.whatsapp, secrets.bridges.whatsapp);
@@ -89,7 +138,8 @@ export async function writeConfiguration(layout: MatrixLayout): Promise<MatrixIn
   await write(paths.whatsapp.registration, registrationText);
   await write(paths.whatsapp.config, whatsappConfig(layout, secrets.bridges.whatsapp));
   await write(paths.whatsapp.start, whatsappStart);
-  await write(paths.ready, "");
+  await write(paths.synapse.ready, "");
+  await write(paths.whatsapp.ready, "");
 
   return {
     homeserver: { url: layout.synapseUrl, serverName: layout.serverName, registrationSharedSecret: secrets.registrationSharedSecret },
@@ -178,14 +228,14 @@ app_service_config_files:
 }
 
 /**
- * Run by the Synapse companion: copies its configuration out of the shared volume, adds the
+ * Run by the Synapse companion: copies its configuration out of its configuration volume, adds the
  * database from `DATABASE_URL`, and runs Synapse as its own user, as the image does.
  */
 const synapseStart = `#!/bin/sh
 ${header}
 set -eu
 mkdir -p ${dataDirectory}/config ${dataDirectory}/media
-cp /config/synapse/homeserver.yaml /config/synapse/log.yaml /config/synapse/signing.key /config/synapse/whatsapp-registration.yaml ${dataDirectory}/config/
+cp ${["homeserver.yaml", "log.yaml", "signing.key", "whatsapp-registration.yaml"].map((file) => join(companionConfigDirectory, file)).join(" ")} ${dataDirectory}/config/
 python - <<'PYTHON'
 import json, os, urllib.parse
 url = urllib.parse.urlparse(os.environ["DATABASE_URL"])
@@ -207,6 +257,7 @@ exec gosu 991:991 python -m synapse.app.homeserver -c ${dataDirectory}/config/ho
 `;
 
 function registration(serverName: string, url: string, bridge: BridgeSecrets): string {
+  const messenger = whatsapp();
   const domain = serverName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return `${header}
 id: whatsapp
@@ -217,9 +268,9 @@ sender_localpart: ${q(bridge.senderLocalpart)}
 rate_limited: false
 namespaces:
   users:
-    - regex: ${q(`^@whatsappbot:${domain}$`)}
+    - regex: ${q(`^@${messenger.botLocalpart}:${domain}$`)}
       exclusive: true
-    - regex: ${q(`^@whatsapp_.*:${domain}$`)}
+    - regex: ${q(`^@${messenger.ghostPrefix}.*:${domain}$`)}
       exclusive: true
 `;
 }
@@ -264,13 +315,13 @@ appservice:
   port: ${portOf(layout.bridgeUrls.whatsapp)}
   id: whatsapp
   bot:
-    username: whatsappbot
+    username: ${whatsapp().botLocalpart}
     displayname: WhatsApp bridge bot
   # No read receipts or typing notifications from Matrix, so none reach WhatsApp.
   ephemeral_events: false
   as_token: ${q(bridge.asToken)}
   hs_token: ${q(bridge.hsToken)}
-  username_template: whatsapp_{{.}}
+  username_template: ${whatsapp().ghostPrefix}{{.}}
 matrix:
   message_status_events: false
   delivery_receipts: false
@@ -294,7 +345,7 @@ logging:
 }
 
 /**
- * Run by the WhatsApp companion: copies its configuration out of the shared volume, puts in its
+ * Run by the WhatsApp companion: copies its configuration out of its configuration volume, puts in its
  * egress proxy, and runs the bridge as its own user, as the image does, without letting it
  * rewrite the configuration.
  */
@@ -302,22 +353,34 @@ const whatsappStart = `#!/bin/sh
 ${header}
 set -eu
 mkdir -p ${dataDirectory}
-sed "s|${proxyPlaceholder}|\${HTTPS_PROXY:-}|" /config/whatsapp/config.yaml > ${dataDirectory}/config.yaml
-cp /config/whatsapp/registration.yaml ${dataDirectory}/registration.yaml
+sed "s|${proxyPlaceholder}|\${HTTPS_PROXY:-}|" ${companionConfigDirectory}/config.yaml > ${dataDirectory}/config.yaml
+cp ${companionConfigDirectory}/registration.yaml ${dataDirectory}/registration.yaml
 chown -R 1337:1337 ${dataDirectory}
 chmod 600 ${dataDirectory}/config.yaml ${dataDirectory}/registration.yaml
 exec su-exec 1337:1337 /usr/bin/mautrix-whatsapp -c ${dataDirectory}/config.yaml -r ${dataDirectory}/registration.yaml -n
 `;
 
-async function write(file: string, contents: string): Promise<void> {
-  await writeFile(file, contents, { mode: 0o600 });
-  await chmod(file, 0o600);
+/** The WhatsApp Messenger, whose bot and ghost users its bridge's configuration names. */
+function whatsapp(): Messenger {
+  const messenger = messengerOf("whatsapp");
+  if (!messenger) throw new Error("The WhatsApp Messenger is missing from messengers.ts.");
+  return messenger;
 }
 
-async function readJson<T>(file: string): Promise<T | null> {
+/** Writes a file whole or not at all: into a temporary file next to it, then renamed over it. */
+async function write(file: string, contents: string): Promise<void> {
+  const temporary = `${file}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(temporary, contents, { mode: 0o600 });
+  await chmod(temporary, 0o600);
+  await rename(temporary, file);
+}
+
+/** A file's text, or null when it does not exist; any other failure to read it is thrown. */
+async function readIfExists(file: string): Promise<string | null> {
   try {
-    return JSON.parse(await readFile(file, "utf8")) as T;
-  } catch {
-    return null;
+    return await readFile(file, "utf8");
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return null;
+    throw error;
   }
 }

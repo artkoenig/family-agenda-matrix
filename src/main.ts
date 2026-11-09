@@ -1,6 +1,6 @@
 /**
  * Runs the Matrix Source as an HTTP plugin on PORT (8080 by default), as its image does: writes
- * the configuration of Synapse and the bridges into the volume shared with them, then serves.
+ * the configuration of Synapse and the bridges into their volumes, then serves.
  */
 import { servePlugin } from "@family-agenda/plugin-kit/server";
 import { writeConfiguration } from "./configuration";

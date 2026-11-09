@@ -5,7 +5,7 @@ import { PluginError, type PluginImplementation } from "@family-agenda/plugin-ki
 import packageJson from "../package.json" with { type: "json" };
 import {
   bridgeClient,
-  HomeserverError,
+  RefusedError,
   homeserverClient,
   type BridgeClient,
   type HomeserverClient,
@@ -33,6 +33,11 @@ export type MatrixPluginOptions = {
    * server's reply; to stderr by default.
    */
   log?: (message: string, error: unknown) => void;
+  /**
+   * How long a companion may fail to answer before that is a definite error, which needs an
+   * Admin: it is misconfigured, or keeps crashing.
+   */
+  failingAfterMs?: number;
 };
 
 /** The plugin's own version: that of package.json, raised with each release. */
@@ -108,6 +113,26 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
   const log = options.log ?? ((message: string, error: unknown) => console.error(message, error));
   const homeserver = homeserverClient({ url: instance.homeserver.url, timeoutMs });
   const sessions = new Map<string, LoginSession>();
+  const failingAfterMs = options.failingAfterMs ?? 10 * 60_000;
+  /** Since when each companion, by Messenger id or `homeserver`, has not answered. */
+  const failingSince = new Map<string, number>();
+
+  /** Notes that a companion did not answer; whether it has not for longer than `failingAfterMs`. */
+  function failingTooLong(companion: string): boolean {
+    const now = Date.now();
+    const since = failingSince.get(companion) ?? now;
+    failingSince.set(companion, since);
+    return now - since >= failingAfterMs;
+  }
+
+  /** That a companion has not answered for too long: a definite error, so that an Admin looks. */
+  function keepsFailing(name: string): PluginError {
+    const minutes = Math.round(failingAfterMs / 60_000);
+    return new PluginError(
+      "definite",
+      `${name} has not answered for ${minutes} minutes. It is misconfigured or keeps failing; the logs of the Matrix plugin and its companions say why.`,
+    );
+  }
 
   /** Whether the bridge of a Messenger answers: a companion not in plugins.yml has no address at all. */
   async function reachability(messenger: Messenger): Promise<Reachability> {
@@ -115,15 +140,18 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     if (!bridge) return "missing";
     try {
       const response = await fetch(new URL("/_matrix/mau/live", bridge.url), { signal: AbortSignal.timeout(timeoutMs) });
+      if (response.ok) failingSince.delete(messenger.id);
       return response.ok ? "up" : "down";
     } catch (error) {
       return causeCodeOf(error) === "ENOTFOUND" ? "missing" : "down";
     }
   }
 
-  /** Why a Messenger cannot be reached now: not installed, or still starting. */
+  /** Why a Messenger cannot be reached now: not installed, still starting, or failing for too long. */
   async function unavailable(messenger: Messenger): Promise<PluginError> {
-    if ((await reachability(messenger)) === "missing") return new PluginError("definite", `${messenger.attributeValue} is not installed on this Instance.`);
+    const reachable = await reachability(messenger);
+    if (reachable === "missing") return new PluginError("definite", `${messenger.attributeValue} is not installed on this Instance.`);
+    if (reachable === "down" && failingTooLong(messenger.id)) return keepsFailing(`The ${messenger.attributeValue} bridge`);
     return new PluginError("temporary", englishOf(starting(messenger)));
   }
 
@@ -148,11 +176,11 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     try {
       logins = await bridge.logins(userId);
     } catch (error) {
-      if (!(error instanceof HomeserverError)) throw await unavailable(messenger);
+      if (!(error instanceof RefusedError)) throw await unavailable(messenger);
       log(`The ${messenger.attributeValue} bridge refused to list the logins:`, error);
       throw new PluginError("temporary", `The ${messenger.attributeValue} bridge could not be reached.`);
     }
-    loginStateProblem(logins, messenger.attributeValue);
+    loginStateProblem(logins, messenger.attributeValue, log);
   }
 
   async function poll(context: RunContext): Promise<IngestResult> {
@@ -207,7 +235,7 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     try {
       return await startLogin(bridge, userId, messenger);
     } catch (error) {
-      if (!(error instanceof HomeserverError)) return notYet(await unavailable(messenger), messenger);
+      if (!(error instanceof RefusedError)) return notYet(await unavailable(messenger), messenger);
       log(`The ${messenger.attributeValue} bridge refused to start a login:`, error);
       return { status: "failed", message: `The ${messenger.attributeValue} bridge could not start the login.` };
     }
@@ -227,10 +255,10 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     }
     const step = await bridge.startLogin(userId, messenger.qrLoginFlow);
     if (step.type === "complete") return { status: "done", message: linked(messenger) };
-    if (step.type !== "display_and_wait") return { status: "failed", message: step.instructions };
+    if (step.type !== "display_and_wait") return { status: "failed", message: unexpectedStep(step, messenger, log) };
     const started: LoginSession = { qrCode: step.qrCode, outcome: "waiting" };
     sessions.set(userId, started);
-    void awaitScan(bridge, userId, step, started, log);
+    void awaitScan(bridge, userId, step, started, messenger, log);
     return waiting(messenger, started.qrCode);
   }
 
@@ -256,16 +284,30 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     for (;;) {
       try {
         const account = await homeserver.register(`family-agenda-${randomBytes(6).toString("hex")}`, instance.homeserver.registrationSharedSecret);
+        failingSince.delete("homeserver");
         return { plain: { userId: account.userId }, secrets: { accessToken: account.accessToken } };
       } catch (error) {
-        if (error instanceof HomeserverError || Date.now() >= deadline) {
+        if (error instanceof RefusedError || Date.now() >= deadline) {
           log("The homeserver could not create a Matrix user:", error);
-          if (error instanceof HomeserverError) throw new PluginError("temporary", "The homeserver could not create a Matrix user.");
-          throw new PluginError("temporary", englishOf(starting(messenger)));
+          throw registrationProblem(error, messenger);
         }
         await sleep(500);
       }
     }
+  }
+
+  /** Why the homeserver created no Matrix user: it refused, or has not answered (for too long). */
+  function registrationProblem(error: unknown, messenger: Messenger): PluginError {
+    if (error instanceof RefusedError) {
+      failingSince.delete("homeserver");
+      // A wrong shared secret: Synapse's configuration does not come from this plugin's secrets.
+      if (error.status === 401 || error.status === 403) {
+        return new PluginError("definite", "The homeserver refused to create a Matrix user: its configuration does not match the plugin's. The logs of the Matrix plugin and of Synapse say why.");
+      }
+      return new PluginError("temporary", "The homeserver could not create a Matrix user.");
+    }
+    if (failingTooLong("homeserver")) return keepsFailing("The homeserver");
+    return new PluginError("temporary", englishOf(starting(messenger)));
   }
 
   async function sourceRemoved(context: RunContext): Promise<undefined> {
@@ -380,13 +422,15 @@ function accountOf(config: Config): { userId: string; token: string } {
   return { userId, token };
 }
 
-function loginStateProblem(logins: { stateEvent: string; reason: string | null }[], name: string): void {
+/** Fails unless a login works; the bridge's own reason goes to the log only, as it is the bridge's text. */
+function loginStateProblem(logins: { stateEvent: string; reason: string | null }[], name: string, log: (message: string, error: unknown) => void): void {
   if (logins.some((login) => workingStates.has(login.stateEvent))) return;
   if (logins.length === 0) throw new PluginError("definite", `The ${name} account is not linked. Press Fix to scan the QR code.`);
   const loggedOut = logins.find((login) => loggedOutStates.has(login.stateEvent));
   if (!loggedOut) throw new PluginError("temporary", `The ${name} bridge reports a problem with the account.`);
   const reason = logins.map((login) => login.reason).find((found) => found !== null);
-  throw new PluginError("definite", `The ${name} account was logged out${reason ? ` (${reason})` : ""}. Press Fix to scan the QR code again.`);
+  if (reason) log(`The ${name} bridge logged the account out:`, reason);
+  throw new PluginError("definite", `The ${name} account was logged out. Press Fix to scan the QR code again.`);
 }
 
 /** While the Messenger starts, the step waits; otherwise it failed. */
@@ -411,6 +455,7 @@ async function awaitScan(
   userId: string,
   first: { loginId: string; stepId: string },
   session: LoginSession,
+  messenger: Messenger,
   log: (message: string, error: unknown) => void,
 ): Promise<void> {
   let step = first;
@@ -422,7 +467,7 @@ async function awaitScan(
         return;
       }
       if (next.type !== "display_and_wait") {
-        session.outcome = { failed: next.instructions };
+        session.outcome = { failed: unexpectedStep(next, messenger, log) };
         return;
       }
       session.qrCode = next.qrCode;
@@ -432,6 +477,16 @@ async function awaitScan(
     log("The login did not finish:", error);
     session.outcome = { failed: { en: "The login did not finish. Try again.", de: "Die Verknüpfung wurde nicht abgeschlossen. Versuche es noch einmal." } };
   }
+}
+
+/** A login step the plugin cannot show, such as one asking for a phone number: its instructions go to the log only. */
+function unexpectedStep(step: { instructions: string }, messenger: Messenger, log: (message: string, error: unknown) => void): PluginText {
+  log(`The ${messenger.attributeValue} bridge asked for a login step the plugin cannot show:`, step.instructions);
+  const name = messenger.attributeValue;
+  return {
+    en: `The ${name} bridge could not link the account by QR code. Try again; the plugin's log says why.`,
+    de: `Die ${name}-Bridge konnte das Konto nicht per QR-Code verknüpfen. Versuche es noch einmal; das Log des Plugins sagt, warum.`,
+  };
 }
 
 function waiting(messenger: Messenger, qrCode: string | null): SetupProgress {
@@ -835,7 +890,7 @@ function parseState(state: string | null): Previous | null {
 /** A user that no longer exists, or a token it lost, needs an Admin; anything else may pass. */
 function homeserverError(error: unknown, log: (message: string, error: unknown) => void): PluginError {
   if (error instanceof PluginError) return error;
-  if (error instanceof HomeserverError && error.errcode === "M_UNKNOWN_TOKEN") {
+  if (error instanceof RefusedError && error.errcode === "M_UNKNOWN_TOKEN") {
     return new PluginError("definite", "The homeserver no longer knows the Source's Matrix user. Remove the Source and add it again.");
   }
   log("The homeserver could not be read:", error);

@@ -20,8 +20,8 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
-# The volume shared with the companions, into which the plugin writes their configuration.
-RUN mkdir /config && chown node /config
+# The plugin's volume for the secrets, and below it one volume per companion for its configuration.
+RUN mkdir -p /config/synapse /config/whatsapp && chown -R node /config
 
 USER node
 ENV PORT=8080

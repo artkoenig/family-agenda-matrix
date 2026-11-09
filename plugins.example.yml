@@ -1,23 +1,32 @@
 # The Matrix plugin in a Family Agenda plugins.yml (see docs/configuration.md of Family Agenda).
 # Each container gets the private network of the plugin and its own egress allowlist. The plugin
-# writes the configuration of Synapse and the bridges into the `config` volume and creates
-# `/config/ready` last; the companions wait for it, then start from it.
+# keeps the secrets in its own `matrix-secrets` volume, which no companion mounts, and writes each
+# companion's configuration into a volume shared with that companion alone, creating `ready` in it
+# last; the companion waits for it, then starts from it. So the bridge, which reaches the
+# internet, never sees Synapse's secrets or signing key. A companion without `ready` after five
+# minutes exits with the reason in its log and is restarted. (`$$` is a `$` to Docker Compose.)
 plugins:
   - id: matrix
+    # Not published yet: pin it by digest (tag@sha256:...) once the 0.1.0 image is on ghcr.io.
     image: ghcr.io/artkoenig/family-agenda-matrix:0.1.0
     # No egress: the plugin talks only to its companions.
     volumes:
-      config: /config
+      matrix-secrets: /config
+      synapse-config: /config/synapse
+      whatsapp-config: /config/whatsapp
     companions:
       # The homeserver: no federation, no registration; its database is a C-collation Postgres
       # database of the core's server (DATABASE_URL), its media stay in the `synapse` volume.
       - name: synapse
-        image: matrixdotorg/synapse:v1.163.2
+        image: matrixdotorg/synapse:v1.163.2@sha256:c3c21919a322f74d177a43bce8031adc81ef839ddd117a8dd03cfec350e76e02
         database: true
         volumes:
-          config: /config
+          synapse-config: /config
           synapse: /data
-        command: ["sh", "-c", "until [ -f /config/ready ]; do sleep 1; done; exec sh /config/synapse/start.sh"]
+        command:
+          - sh
+          - -c
+          - i=0; until [ -f /config/ready ]; do i=$$((i+1)); if [ "$$i" -gt 300 ]; then echo "No configuration from plugin-matrix after 5 minutes; see its log." >&2; exit 1; fi; sleep 1; done; exec sh /config/start.sh
         healthcheck:
           test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
           interval: 15s
@@ -26,11 +35,20 @@ plugins:
       # One bridge per Messenger, named after its Messenger id. Its session stays in its own volume;
       # it reaches the Messenger through the egress proxy in HTTPS_PROXY.
       - name: whatsapp
-        image: dock.mau.dev/mautrix/whatsapp:v0.2610.0
+        image: dock.mau.dev/mautrix/whatsapp:v0.2610.0@sha256:c807054cb015d0f5c90d20d85aac216d062b4a6f4ae834b931fd5e7f03e27391
         volumes:
-          config: /config
+          whatsapp-config: /config
           whatsapp: /data
-        command: ["sh", "-c", "until [ -f /config/ready ]; do sleep 1; done; exec sh /config/whatsapp/start.sh"]
+        command:
+          - sh
+          - -c
+          - i=0; until [ -f /config/ready ]; do i=$$((i+1)); if [ "$$i" -gt 300 ]; then echo "No configuration from plugin-matrix after 5 minutes; see its log." >&2; exit 1; fi; sleep 1; done; exec sh /config/start.sh
+        # The bridge's own liveness endpoint, with the busybox wget of its Alpine image.
+        healthcheck:
+          test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:29318/_matrix/mau/live"]
+          interval: 15s
+          timeout: 5s
+          retries: 3
         egress:
           - "*.whatsapp.net:443"
           - "*.whatsapp.com:443"

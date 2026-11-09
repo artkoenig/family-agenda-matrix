@@ -7,6 +7,7 @@ import { createPluginHandler } from "@family-agenda/plugin-kit/server";
 import { pluginClient, type Call } from "@family-agenda/plugin-kit/testing";
 import { describePluginContract } from "@family-agenda/plugin-kit/vitest";
 import type { MatrixInstance } from "../src/instance";
+import { homeserverClient } from "../src/homeserver";
 import { createMatrixPlugin, type MatrixPluginOptions } from "../src/plugin";
 import { FakeHomeserver } from "./fake-homeserver";
 
@@ -223,13 +224,18 @@ describe("the bridge's login states", () => {
     expect(await failure()).toEqual({ kind: "definite", message: "The WhatsApp account is not linked. Press Fix to scan the QR code." });
   });
 
-  it("is a definite error once the account is logged out", async () => {
+  it("is a definite error once the account is logged out, with the bridge's reason in the log only", async () => {
     homeserver.setLogin(userOf(config), "LOGGED_OUT", "Unlinked from the phone");
+    const logged: unknown[] = [];
+    let message = "";
+    try {
+      await poll(config, null, plugin({ log: (_, error) => logged.push(error) }));
+    } catch (error) {
+      if (error instanceof PluginError) message = `${error.kind}: ${error.message}`;
+    }
 
-    expect(await failure()).toEqual({
-      kind: "definite",
-      message: "The WhatsApp account was logged out (Unlinked from the phone). Press Fix to scan the QR code again.",
-    });
+    expect(message).toBe("definite: The WhatsApp account was logged out. Press Fix to scan the QR code again.");
+    expect(logged).toEqual(["Unlinked from the phone"]);
   });
 
   it("reads while the bridge reconnects", async () => {
@@ -295,6 +301,21 @@ describe("linking the account by QR code", () => {
     const refused = await progressOf(config, plugin({ instance: wrongSecret }));
 
     expect(refused).toMatchObject({ status: "failed", message: expect.stringContaining("bridge could not start the login") as unknown });
+  });
+
+  it("fails with a generic message when the bridge asks for a step it cannot show, its instructions in the log only", async () => {
+    const logged: unknown[] = [];
+    const of = plugin({ log: (_, error) => logged.push(error) });
+    const config = await addSource(of);
+    homeserver.otherLoginStep = "Enter your phone number <script>";
+    try {
+      const shown = await progressOf(config, of);
+      expect(shown).toMatchObject({ status: "failed", message: { en: expect.stringContaining("could not link the account by QR code") as unknown } });
+      expect(JSON.stringify(shown)).not.toContain("phone number");
+      expect(logged).toEqual(["Enter your phone number <script>"]);
+    } finally {
+      homeserver.otherLoginStep = null;
+    }
   });
 
   it("fails for a Source without a known Messenger", async () => {
@@ -662,12 +683,52 @@ describe("a Messenger still starting", () => {
     }
   });
 
+  it("is a definite error once the bridge has not answered for too long", async () => {
+    const config = { plain: { messenger: "whatsapp", userId: "@x:y" }, secrets: { accessToken: "t" } };
+    const failing = plugin({ instance: closed(`http://127.0.0.1:${await freePort()}`), failingAfterMs: 0 });
+
+    await expect(poll(config, null, failing)).rejects.toMatchObject({ kind: "definite", message: expect.stringContaining("The WhatsApp bridge has not answered") as unknown });
+    expect(await progressOf(config, failing)).toMatchObject({ status: "failed" });
+  });
+
+  it("is a definite error once Synapse has not come up for too long", async () => {
+    const failing = plugin({ instance: closed(`http://127.0.0.1:${await freePort()}`), startTimeoutMs: 0, failingAfterMs: 0 });
+    await expect(addSource(failing)).rejects.toMatchObject({ kind: "definite", message: expect.stringContaining("The homeserver has not answered") as unknown });
+  });
+
+  it("is a definite error when Synapse refuses the plugin's shared secret", async () => {
+    const instance = { ...homeserver.instance(), homeserver: { ...homeserver.instance().homeserver, registrationSharedSecret: "wrong" } };
+
+    await expect(addSource(plugin({ instance }))).rejects.toMatchObject({ kind: "definite", message: expect.stringContaining("does not match the plugin's") as unknown });
+  });
+
   it("is a temporary error without the message of the failure when Synapse does not come up in time", async () => {
     const logged: unknown[] = [];
     const starting = plugin({ instance: closed(`http://127.0.0.1:${await freePort()}`), startTimeoutMs: 0, log: (_, error) => logged.push(error) });
 
     await expect(addSource(starting)).rejects.toMatchObject({ kind: "temporary", message: expect.stringContaining("WhatsApp is starting") as unknown });
     expect(logged).toHaveLength(1);
+  });
+});
+
+describe("downloading media", () => {
+  const client = homeserverClient({ url: homeserver.url, timeoutMs: 5000 });
+  const token = async () => (await client.register(`media-${Date.now()}`, homeserver.registrationSharedSecret)).accessToken;
+
+  it.each([
+    ["with a content-length", false],
+    ["streamed", true],
+  ])("stops at the size limit %s", async (_, streamed) => {
+    homeserver.streamMedia = streamed;
+    try {
+      const accessToken = await token();
+      const url = homeserver.upload(new TextEncoder().encode("0123456789"));
+
+      expect(await client.download(accessToken, url, 9)).toBeNull();
+      expect(Buffer.from((await client.download(accessToken, url, 10)) ?? []).toString()).toBe("0123456789");
+    } finally {
+      homeserver.streamMedia = false;
+    }
   });
 });
 
