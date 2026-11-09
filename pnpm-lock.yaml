@@ -172,13 +172,13 @@ importers:
       '@family-agenda/plugin-kit':
         specifier: github:artkoenig/family-agenda#4e40c4ec80260c05c763f4a04c9c60633e982f91&path:/packages/plugin-kit
         version: https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-kit(@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)))
-      tsx:
-        specifier: 4.23.15
-        version: 4.23.15
     devDependencies:
       '@types/node':
         specifier: ^26.0.0
         version: 26.6.6
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -1092,6 +1092,7 @@ snapshots:
       esbuild: 0.28.2
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   typescript@6.0.3: {}
 
