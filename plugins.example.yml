@@ -23,15 +23,10 @@ plugins:
         volumes:
           synapse-config: /config
           synapse: /data
-        command:
+        entrypoint:
           - sh
           - -c
           - i=0; until [ -f /config/ready ]; do i=$$((i+1)); if [ "$$i" -gt 300 ]; then echo "No configuration from plugin-matrix after 5 minutes; see its log." >&2; exit 1; fi; sleep 1; done; exec sh /config/start.sh
-        healthcheck:
-          test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
-          interval: 15s
-          timeout: 5s
-          retries: 3
       # One bridge per Messenger, named after its Messenger id. Its session stays in its own volume;
       # it reaches the Messenger through the egress proxy in HTTPS_PROXY.
       - name: whatsapp
@@ -39,16 +34,11 @@ plugins:
         volumes:
           whatsapp-config: /config
           whatsapp: /data
-        command:
+        entrypoint:
           - sh
           - -c
           - i=0; until [ -f /config/ready ]; do i=$$((i+1)); if [ "$$i" -gt 300 ]; then echo "No configuration from plugin-matrix after 5 minutes; see its log." >&2; exit 1; fi; sleep 1; done; exec sh /config/start.sh
         # The bridge's own liveness endpoint, with the busybox wget of its Alpine image.
-        healthcheck:
-          test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:29318/_matrix/mau/live"]
-          interval: 15s
-          timeout: 5s
-          retries: 3
         egress:
           - "*.whatsapp.net:443"
           - "*.whatsapp.com:443"
