@@ -198,10 +198,7 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       await syncInvitations(state, homeserver, token, { userId, messenger, serverName }, sync, left, previous);
       syncJoined(state, sync);
       await classify(state, homeserver, token);
-      // Only group chats are read: a direct chat is never one to read, even when allow-listed before.
-      const allowedJids = allowedJidsOf(chatsOf(context.config.plain.chats), state);
-      const allowListed = new Set(Object.keys(state.rooms).filter((roomId) => state.groups[roomId] === true && allowedJids.has(state.jids[roomId] ?? "")));
-      const attributes = declareChats(state, previous, allowedJids, allowListed);
+      const { allowListed, attributes } = declareAllowed(state, previous, chatsOf(context.config.plain.chats));
 
       const { withdrawn, events } = await collectEvents(state, homeserver, token, sync, previous, allowListed, backfillStart);
 
@@ -379,6 +376,8 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       catalogue: { title: { en: "Messengers", de: "Messenger" }, configKey: "messenger" },
     },
     poll: guarded("poll", poll),
+    // The groups as the last run left them: no call to the homeserver.
+    sourceAttributes: guarded("sourceAttributes", async (context) => attributesOf(context)),
     setupProgress: guarded("setupProgress", async ({ stepId, context }) => {
       if (stepId !== "login") throw new PluginError("definite", "The Matrix plugin has no such setup step.");
       return progress(context);
@@ -640,6 +639,22 @@ function declareChats(state: State, previous: Previous | null, allowedJids: Set<
     declared: [...names].map(([externalId, name]) => ({ externalId, name })),
     archived: before.filter((jid) => !state.declared.includes(jid)),
   };
+}
+
+/** The allow-listed group rooms, and the Source Attributes they come to. */
+function declareAllowed(state: State, previous: Previous | null, chats: string[]): { allowListed: Set<string>; attributes: Attributes } {
+  // Only group chats are read: a direct chat is never one to read, even when allow-listed before.
+  const allowedJids = allowedJidsOf(chats, state);
+  const allowListed = new Set(Object.keys(state.rooms).filter((roomId) => state.groups[roomId] === true && allowedJids.has(state.jids[roomId] ?? "")));
+  return { allowListed, attributes: declareChats(state, previous, allowedJids, allowListed) };
+}
+
+/** The Source Attributes of the rooms the sync cursor knows and the allow-list as it is now; none before a first run. */
+function attributesOf(context: RunContext): Attributes {
+  const previous = parseState(context.syncCursor);
+  if (!previous) return { declared: [], archived: [] };
+  const state: State = { since: previous.since, ...previousFields(previous), declared: [], read: [] };
+  return declareAllowed(state, previous, chatsOf(context.config.plain.chats)).attributes;
 }
 
 /** The names of the rooms by the JID of their group; a group with several rooms has the name of the last. */

@@ -542,6 +542,17 @@ describe("chats as Source Attributes", () => {
     expect(second.sourceRecords.map((record) => record.attributes)).toEqual([[jid]]);
   });
 
+  it("names the allow-listed groups apart from a run as the last run left them, archiving one taken off the list", async () => {
+    const first = await poll(allowListing(config, jid), null, plugin(), now);
+    const second = await poll(allowListing(config, jid), first.syncCursor, plugin(), now);
+    const asked = homeserver.requests.length;
+
+    expect(await invoke(plugin(), "sourceAttributes", context(allowListing(config, jid), second.syncCursor))).toEqual(second.attributes);
+    expect(await invoke(plugin(), "sourceAttributes", context(config, second.syncCursor))).toEqual({ declared: [], archived: [jid] });
+    expect(await invoke(plugin(), "sourceAttributes", context(config))).toEqual({ declared: [], archived: [] });
+    expect(homeserver.requests.length).toBe(asked);
+  });
+
   it("declares nothing for a group the Admin has not added", async () => {
     const attributes = recordingAttributes();
     homeserver.createRoom("FC Eltern U11");
