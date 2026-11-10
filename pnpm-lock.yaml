@@ -167,11 +167,11 @@ importers:
   .:
     dependencies:
       '@family-agenda/plugin-contract':
-        specifier: github:artkoenig/family-agenda#4e40c4ec80260c05c763f4a04c9c60633e982f91&path:/packages/plugin-contract
-        version: https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract
+        specifier: github:artkoenig/family-agenda#51056ae8303d2c6a9922afbd29bab6cc1258d9f5&path:/packages/plugin-contract
+        version: https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract
       '@family-agenda/plugin-kit':
-        specifier: github:artkoenig/family-agenda#4e40c4ec80260c05c763f4a04c9c60633e982f91&path:/packages/plugin-kit
-        version: https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-kit(@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)))
+        specifier: github:artkoenig/family-agenda#51056ae8303d2c6a9922afbd29bab6cc1258d9f5&path:/packages/plugin-kit
+        version: https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-kit(@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)))
     devDependencies:
       '@types/node':
         specifier: ^26.0.0
@@ -344,12 +344,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract':
-    resolution: {gitHosted: true, integrity: sha512-myQ/wPC1qHoMJQjmFC8RyvdoxBOyAVmzGawg9ULNwaY99j/OkUyhQKmzB9IUnIclt5i+vhPZ1eUvq1iXwthJ4g==, path: /packages/plugin-contract, tarball: https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91}
+  '@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract':
+    resolution: {gitHosted: true, integrity: sha512-w4Zz5kqUq99wLU++QExaY10zaYLmE7/0pGDc3Jjtx/I7+n7lUGAXDx5Ggxw3JlYK0CXiAGNDADQzeDlx7hOYXw==, path: /packages/plugin-contract, tarball: https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5}
     version: 0.0.0
 
-  '@family-agenda/plugin-kit@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-kit':
-    resolution: {gitHosted: true, integrity: sha512-myQ/wPC1qHoMJQjmFC8RyvdoxBOyAVmzGawg9ULNwaY99j/OkUyhQKmzB9IUnIclt5i+vhPZ1eUvq1iXwthJ4g==, path: /packages/plugin-kit, tarball: https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91}
+  '@family-agenda/plugin-kit@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-kit':
+    resolution: {gitHosted: true, integrity: sha512-w4Zz5kqUq99wLU++QExaY10zaYLmE7/0pGDc3Jjtx/I7+n7lUGAXDx5Ggxw3JlYK0CXiAGNDADQzeDlx7hOYXw==, path: /packages/plugin-kit, tarball: https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5}
     version: 0.0.0
     peerDependencies:
       '@family-agenda/plugin-contract': '*'
@@ -843,13 +843,13 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract':
+  '@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract':
     dependencies:
       zod: 4.6.7
 
-  '@family-agenda/plugin-kit@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-kit(@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)))':
+  '@family-agenda/plugin-kit@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-kit(@family-agenda/plugin-contract@https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)))':
     dependencies:
-      '@family-agenda/plugin-contract': https://codeload.github.com/artkoenig/family-agenda/tar.gz/4e40c4ec80260c05c763f4a04c9c60633e982f91#path:/packages/plugin-contract
+      '@family-agenda/plugin-contract': https://codeload.github.com/artkoenig/family-agenda/tar.gz/51056ae8303d2c6a9922afbd29bab6cc1258d9f5#path:/packages/plugin-contract
       zod: 4.6.7
     optionalDependencies:
       vitest: 5.1.0(@types/node@26.6.6)(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
