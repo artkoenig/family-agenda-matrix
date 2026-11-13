@@ -1,6 +1,6 @@
 {
   "name": "family-agenda-matrix",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "The Matrix Source Type of Family Agenda as a singleton plugin container, with Synapse and one bridge per Messenger as companions.",
