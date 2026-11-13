@@ -33,17 +33,21 @@ async function invoke<T = unknown>(of: Call, name: Parameters<Call>[0], body?: u
   return answer.body as T;
 }
 
+/** The egress proxy the core hands every call, with the ticket for that one Source. */
+const egressProxy = "http://ticket:a-ticket@plugin-matrix-egress:3128";
+
 const context = (config: RunContext["config"], syncCursor: string | null = null, at = now) => ({
   config,
   syncCursor,
   now: at.toISOString(),
   timeZone: "Europe/Berlin",
+  egressProxy,
 });
 
 /** Adds a Source as the core does: the plugin creates its Matrix user, whose values go into its configuration. */
 async function addSource(of: Call = plugin()): Promise<RunContext["config"]> {
   const config = { plain: { messenger: "whatsapp" }, secrets: {} };
-  const prepared = await invoke<RunContext["config"]>(of, "sourceAdded", { config, now: now.toISOString(), timeZone: "Europe/Berlin" });
+  const prepared = await invoke<RunContext["config"]>(of, "sourceAdded", { config, now: now.toISOString(), timeZone: "Europe/Berlin", egressProxy });
   return { plain: { ...config.plain, ...prepared.plain }, secrets: prepared.secrets };
 }
 
@@ -644,7 +648,7 @@ describe("chats as Source Attributes", () => {
 
 describe("the catalogue of Messengers", () => {
   it("lists WhatsApp as installed where its bridge runs as a companion", async () => {
-    const { entries } = await invoke<{ entries: { id: string; installed: boolean }[] }>(plugin(), "catalogueEntries");
+    const { entries } = await invoke<{ entries: { id: string; installed: boolean }[] }>(plugin(), "catalogueEntries", { egressProxy });
 
     expect(entries.map(({ id, installed }) => ({ id, installed }))).toEqual([{ id: "whatsapp", installed: true }]);
   });
@@ -652,7 +656,7 @@ describe("the catalogue of Messengers", () => {
   it("lists WhatsApp as not installed without its companion", async () => {
     const without = plugin({ instance: { ...homeserver.instance(), bridges: { whatsapp: { url: "http://nonexistent.invalid:29318", provisioningSecret: "s" } } } });
 
-    const { entries } = await invoke<{ entries: unknown[] }>(without, "catalogueEntries");
+    const { entries } = await invoke<{ entries: unknown[] }>(without, "catalogueEntries", { egressProxy });
 
     expect(entries[0]).toMatchObject({ id: "whatsapp", installed: false, riskNotice: expect.anything() as unknown });
     await expect(poll({ plain: { messenger: "whatsapp", userId: "@x:y" }, secrets: { accessToken: "t" } }, null, without)).rejects.toThrow(
@@ -749,7 +753,7 @@ describe("a removed Source", () => {
     const config = await addSource(of);
     homeserver.setLogin(userOf(config), "CONNECTED");
 
-    await invoke(of, "sourceRemoved", { config, syncCursor: null, now: now.toISOString(), timeZone: "Europe/Berlin" });
+    await invoke(of, "sourceRemoved", { config, syncCursor: null, now: now.toISOString(), timeZone: "Europe/Berlin", egressProxy });
 
     await expect(poll(config)).rejects.toThrow("The WhatsApp account is not linked.");
     homeserver.setLogin(userOf(config), "CONNECTED");
