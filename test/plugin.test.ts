@@ -19,7 +19,7 @@ await homeserver.start();
 afterAll(() => homeserver.close());
 
 const handlerOf = (options: Partial<MatrixPluginOptions> = {}) =>
-  createPluginHandler(createMatrixPlugin({ instance: homeserver.instance(), timeoutMs: 5000, log: () => undefined, ...options }));
+  createPluginHandler(createMatrixPlugin({ instance: homeserver.instance(), timeoutMs: 5000, loadEveryMs: 10, quietMs: 150, log: () => undefined, ...options }));
 
 const plugin = (options: Partial<MatrixPluginOptions> = {}): Call => pluginClient(handlerOf(options));
 
@@ -224,8 +224,19 @@ describe("the bridge's login states", () => {
     throw new Error("the run did not fail");
   };
 
-  it("is a definite error before the account is linked", async () => {
-    expect(await failure()).toEqual({ kind: "definite", message: "The WhatsApp account is not linked. Press Fix to scan the QR code." });
+  it("is no error before the account is linked, but a Source still being set up", async () => {
+    expect(await poll(config)).toEqual({ sourceRecords: [], syncCursor: null, settingUp: expect.objectContaining({ en: "The WhatsApp account is not linked yet." }) as unknown });
+    expect(await invoke(plugin(), "fieldChoices", { field: "chats", context: context(config) })).toMatchObject({ choices: [], settingUp: { en: expect.stringContaining("once the account is linked") as unknown } });
+  });
+
+  it("is a definite error once the account of a Source that has read is not linked any more", async () => {
+    homeserver.setLogin(userOf(config), "CONNECTED");
+    const { syncCursor } = await poll(config);
+    homeserver.setLogin(userOf(config), null);
+
+    const error = await poll(config, syncCursor).catch((thrown: unknown) => thrown);
+
+    expect(error).toMatchObject({ kind: "definite", message: "The WhatsApp account is not linked. Press Fix to scan the QR code." });
   });
 
   it("is a definite error once the account is logged out, with the bridge's reason in the log only", async () => {
@@ -290,6 +301,48 @@ describe("linking the account by QR code", () => {
     await waitUntil(async () => (await progress()).status === "done");
     // Once linked, the Source reads.
     await expect(poll(config)).resolves.toMatchObject({ sourceRecords: [] });
+  });
+
+  it("joins the chats as they arrive, counts the groups meanwhile, and is done once no more come", async () => {
+    const of = plugin({ quietMs: 600 });
+    const config = await addSource(of);
+    const user = userOf(config);
+    await progressOf(config, of);
+    await waitUntil(() => Promise.resolve(homeserver.awaitsScan(user)));
+    homeserver.scanQr(user);
+    homeserver.invite(homeserver.createRoom("Frau Berger", {}, { direct: true }), user);
+    const group = homeserver.createRoom("Klasse 5b Eltern");
+    homeserver.limitedJoins = 1;
+    homeserver.invite(group, user);
+
+    const loadingText = { en: "Linked. Loading chats … (1 group)", de: "Verknüpft. Chats werden geladen … (1 Gruppe)" };
+    await waitUntil(async () => JSON.stringify((await progressOf(config, of)).message) === JSON.stringify(loadingText));
+    expect(homeserver.isMember(group, user)).toBe(true);
+    expect((await progressOf(config, of)).status).toBe("waiting");
+    const first = await poll(config, null, of);
+    expect(first.settingUp).toEqual(loadingText);
+    expect(await invoke(of, "fieldChoices", { field: "chats", context: context(config, first.syncCursor) })).toMatchObject({ settingUp: loadingText });
+
+    await waitUntil(async () => (await progressOf(config, of)).status === "done");
+    const second = await poll(config, first.syncCursor, of);
+    expect(second.settingUp).toBeUndefined();
+    expect(await invoke(of, "fieldChoices", { field: "chats", context: context(config, second.syncCursor) })).toEqual({
+      choices: [{ value: homeserver.jidOf(group), label: "Klasse 5b Eltern" }],
+    });
+  });
+
+  it("shows a new QR code once nobody scanned the last in time, and fails when the login does", async () => {
+    const of = plugin();
+    const config = await addSource(of);
+    const first = await progressOf(config, of);
+    await waitUntil(() => Promise.resolve(homeserver.awaitsScan(userOf(config))));
+    homeserver.failLogin(userOf(config), "FI.MAU.WHATSAPP.LOGIN_TIMEOUT");
+    await waitUntil(async () => (await progressOf(config, of)).qrCode !== first.qrCode);
+    expect((await progressOf(config, of)).status).toBe("waiting");
+
+    await waitUntil(() => Promise.resolve(homeserver.awaitsScan(userOf(config))));
+    homeserver.failLogin(userOf(config), "FI.MAU.WHATSAPP.PAIR_ERROR");
+    await waitUntil(async () => (await progressOf(config, of)).status === "failed");
   });
 
   it("waits while the bridge does not answer, and fails when it refuses the login", async () => {
@@ -755,7 +808,7 @@ describe("a removed Source", () => {
 
     await invoke(of, "sourceRemoved", { config, syncCursor: null, now: now.toISOString(), timeZone: "Europe/Berlin", egressProxy });
 
-    await expect(poll(config)).rejects.toThrow("The WhatsApp account is not linked.");
+    await expect(poll(config)).resolves.toMatchObject({ settingUp: { en: "The WhatsApp account is not linked yet." } });
     homeserver.setLogin(userOf(config), "CONNECTED");
     await expect(poll(config)).rejects.toThrow("no longer knows the Source's Matrix user");
   });

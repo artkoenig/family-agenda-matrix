@@ -23,7 +23,7 @@ type User = { token: string | null; replay: SyncResponse[] };
 
 type Login = { id: string; name: string; stateEvent: string; reason?: string };
 
-type PendingStep = { loginId: string; respond: (body: unknown) => void };
+type PendingStep = { loginId: string; respond: (body: unknown, status?: number) => void };
 
 /**
  * A stand-in for Synapse and a mautrix bridge in one HTTP server, for the plugin's contract tests
@@ -204,6 +204,13 @@ export class FakeHomeserver {
     const pending = this.pendingSteps.get(userId);
     this.pendingSteps.delete(userId);
     pending?.respond(this.qrStep(pending.loginId));
+  }
+
+  /** Nobody scanned the QR code in time, or the bridge gives the login up with another error. */
+  failLogin(userId: string, errcode: string): void {
+    const pending = this.pendingSteps.get(userId);
+    this.pendingSteps.delete(userId);
+    pending?.respond({ errcode, error: "The login ended" }, 400);
   }
 
   private append(roomId: string, event: Omit<MatrixEvent, "event_id">): string {
@@ -532,8 +539,8 @@ export class FakeHomeserver {
     if (step) {
       this.pendingSteps.set(userId, {
         loginId: decodeURIComponent(step[1] ?? ""),
-        respond: (answer) => {
-          respond(response, 200, answer);
+        respond: (answer, status = 200) => {
+          respond(response, status, answer);
         },
       });
       return true;
