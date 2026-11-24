@@ -224,6 +224,12 @@ export function bridgeClient(options: { url: string; secret: string; timeoutMs: 
       }));
     },
 
+    /** The ghost the bridge shows an account's own messages as, such as `@whatsapp_lid-…`; null if it has none. */
+    async ghostOf(userId: string, account: string): Promise<string | null> {
+      const resolved = await call<{ mxid?: unknown }>("GET", `/resolve_identifier/${encodeURIComponent(account)}`, userId);
+      return typeof resolved.mxid === "string" ? resolved.mxid : null;
+    },
+
     async startLogin(userId: string, flow: string): Promise<LoginStep> {
       return stepOf(await call<RawStep>("POST", `/login/start/${encodeURIComponent(flow)}`, userId));
     },

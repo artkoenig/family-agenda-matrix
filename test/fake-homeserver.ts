@@ -43,6 +43,8 @@ export class FakeHomeserver {
   private readonly events: StoredEvent[] = [];
   private readonly rooms = new Map<string, Room>();
   private readonly users = new Map<string, User>();
+  /** The ghost the linked account's own messages come from; null while the bridge cannot tell. */
+  ownGhost: string | null = null;
   private readonly logins = new Map<string, Login[]>();
   private readonly media = new Map<string, Uint8Array>();
   private readonly pendingSteps = new Map<string, PendingStep>();
@@ -506,6 +508,7 @@ export class FakeHomeserver {
     const userId = url.searchParams.get("user_id") ?? "";
     const path = url.pathname.slice("/_matrix/provision/v3".length);
     if (this.provisionWhoami(method, path, userId, response)) return;
+    if (this.provisionResolve(method, path, userId, response)) return;
     if (this.provisionLogin(method, path, userId, response)) return;
     if (this.provisionLogout(method, path, userId, response)) return;
     respond(response, 404, { errcode: "M_UNRECOGNIZED", error: "Unrecognized provisioning request" });
@@ -521,6 +524,16 @@ export class FakeHomeserver {
       profile: {},
     }));
     respond(response, 200, { network: { displayname: "WhatsApp" }, bridge_bot: this.bot, homeserver: this.serverName, logins });
+    return true;
+  }
+
+  /** Newer accounts are shown by their LID rather than their phone number, as `ownGhost` says. */
+  private provisionResolve(method: string, path: string, userId: string, response: ServerResponse): boolean {
+    if (method !== "GET" || !path.startsWith("/resolve_identifier/")) return false;
+    const account = decodeURIComponent(path.slice("/resolve_identifier/".length));
+    const login = this.logins.get(userId)?.find(({ id }) => `+${id}` === account);
+    if (!login || this.ownGhost === null) respond(response, 404, { errcode: "M_NOT_FOUND", error: "Identifier not found" });
+    else respond(response, 200, { id: "lid-1", mxid: this.ownGhost });
     return true;
   }
 

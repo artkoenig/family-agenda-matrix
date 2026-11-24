@@ -403,6 +403,41 @@ describe("chats", () => {
     homeserver.invite(room, userOf(config));
   });
 
+  it("tell which messages the linked account sent itself, shown by its LID or its phone number", async () => {
+    const own = homeserver.ghost("lid-123456789012345");
+    homeserver.ownGhost = own;
+    homeserver.text(room, sender, "Ich bringe Saft mit.", new Date(now.getTime() - 3 * days));
+    homeserver.text(room, own, "Ich bringe Kuchen mit.", new Date(now.getTime() - 2 * days));
+    homeserver.text(room, homeserver.ghost("4915112345678"), "Ich bringe Becher mit.", new Date(now.getTime() - 1 * days));
+
+    const first = await poll(config);
+    const read = await poll(allowListing(config, jid), first.syncCursor);
+    expect(read.sourceRecords.map((record) => [textOf(record), record.own])).toEqual([
+      ["Ich bringe Saft mit.", undefined],
+      ["Ich bringe Kuchen mit.", true],
+      ["Ich bringe Becher mit.", true],
+    ]);
+
+    homeserver.ownGhost = null;
+    homeserver.text(room, own, "Ich bringe Teller mit.", now);
+    const later = await poll(allowListing(config, jid), read.syncCursor);
+    expect(later.sourceRecords.map((record) => record.own), "it is asked once").toEqual([true]);
+  });
+
+  it("are read without telling own messages while the bridge cannot, which is asked again", async () => {
+    const own = homeserver.ghost("lid-123456789012345");
+    homeserver.ownGhost = null;
+    homeserver.text(room, own, "Ich bringe Kuchen mit.", new Date(now.getTime() - 1 * days));
+    const first = await poll(config);
+    const read = await poll(allowListing(config, jid), first.syncCursor);
+    expect(read.sourceRecords.map((record) => record.own)).toEqual([undefined]);
+
+    homeserver.ownGhost = own;
+    homeserver.text(room, own, "Ich bringe Teller mit.", now);
+    const later = await poll(allowListing(config, jid), read.syncCursor);
+    expect(later.sourceRecords.map((record) => record.own)).toEqual([true]);
+  });
+
   it("are read only once allow-listed, then back for two weeks", async () => {
     homeserver.text(room, sender, "Vor drei Wochen: Schulfest.", new Date(now.getTime() - 21 * days));
     homeserver.text(room, sender, "Vor einer Woche: Wandertag am Freitag.", new Date(now.getTime() - 7 * days));

@@ -10,6 +10,8 @@ export type Messenger = {
   botLocalpart: string;
   /** How the local parts of its ghost users start, the Matrix users that stand for the Messenger's users. */
   ghostPrefix: string;
+  /** What the bridge resolves to the account of a login, by the login's id. */
+  accountOf: (loginId: string) => string;
   /** The bridge's login flow that shows a QR code to scan. */
   qrLoginFlow: string;
   /** What to do with the QR code the bridge shows. */
@@ -36,6 +38,8 @@ export const messengers: Messenger[] = [
     },
     botLocalpart: "whatsappbot",
     ghostPrefix: "whatsapp_",
+    // A login's id is the account's phone number, without the "+".
+    accountOf: (loginId) => `+${loginId}`,
     qrLoginFlow: "qr",
     scanHint: {
       en: "On the phone, open WhatsApp, then Settings, Linked devices, Link a device, and scan this code.",

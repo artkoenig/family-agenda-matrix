@@ -73,6 +73,8 @@ type State = {
   names: Record<string, string>;
   read: string[];
   edits: Record<string, string[]>;
+  /** The ghosts the linked accounts' own messages come from, by login id. */
+  own: Record<string, string>;
 };
 
 /** How far back a chat is read the first time, so that a busy group does not bring years of messages. */
@@ -180,8 +182,8 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     return { messenger, bridge };
   }
 
-  /** Whether the account is linked; fails the run when its login does not work, or is gone from a Source that has read. */
-  async function checkLogin(bridge: BridgeClient, messenger: Messenger, userId: string, hasRead: boolean): Promise<boolean> {
+  /** The ids of the account's logins, null while it is not linked; fails the run when its login does not work, or is gone from a Source that has read. */
+  async function checkLogin(bridge: BridgeClient, messenger: Messenger, userId: string, hasRead: boolean): Promise<string[] | null> {
     let logins;
     try {
       logins = await bridge.logins(userId);
@@ -190,16 +192,29 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       log(`The ${messenger.attributeValue} bridge refused to list the logins:`, error);
       throw new PluginError("temporary", `The ${messenger.attributeValue} bridge could not be reached.`);
     }
-    if (logins.length === 0 && !hasRead) return false;
+    if (logins.length === 0 && !hasRead) return null;
     loginStateProblem(logins, messenger.attributeValue, log);
-    return true;
+    return logins.map((login) => login.id);
+  }
+
+  /** Asks the bridge, once per login, which ghost the account's own messages come from. A run goes on without. */
+  async function resolveOwn(state: State, bridge: BridgeClient, messenger: Messenger, userId: string, logins: string[]): Promise<void> {
+    for (const login of logins.filter((id) => !(id in state.own))) {
+      try {
+        const ghost = await bridge.ghostOf(userId, messenger.accountOf(login));
+        if (ghost !== null) state.own[login] = ghost;
+      } catch (error) {
+        log(`The ${messenger.attributeValue} bridge could not tell which messages are the account's own:`, error);
+      }
+    }
   }
 
   async function poll(context: RunContext): Promise<IngestResult> {
     const { messenger, bridge } = await bridgeOf(context.config.plain);
     const { userId, token } = accountOf(context.config);
     const previous = parseState(context.syncCursor);
-    if (!(await checkLogin(bridge, messenger, userId, previous !== null))) {
+    const logins = await checkLogin(bridge, messenger, userId, previous !== null);
+    if (!logins) {
       return { sourceRecords: [], syncCursor: context.syncCursor, settingUp: notLinked(messenger) };
     }
     const backfillStart = new Date(context.now).getTime() - backfillDays * 24 * 60 * 60 * 1000;
@@ -220,7 +235,9 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       state.read = [...allowListed].filter((roomId) => roomId in state.rooms);
       pruneEdits(state, events, withdrawn);
 
-      const sourceRecords = await recordsOf(events, withdrawn, { state, userId, token, messenger, homeserver, serverName });
+      if (events.size > 0) await resolveOwn(state, bridge, messenger, userId, logins);
+      const ownSenders = new Set([...Object.values(state.own), ...logins.map((login) => `@${messenger.ghostPrefix}${login}:${serverName}`)]);
+      const sourceRecords = await recordsOf(events, withdrawn, { state, userId, token, messenger, homeserver, serverName, ownSenders });
       return { sourceRecords, syncCursor: JSON.stringify(state), ...(withdrawn.size > 0 ? { withdrawn: [...withdrawn] } : {}), attributes, ...loadingOf(userId) };
     } catch (error) {
       throw homeserverError(error, log);
@@ -594,6 +611,7 @@ function previousFields(previous: Previous | null) {
     invites: { ...previous?.invites },
     names: { ...previous?.names },
     edits: { ...previous?.edits },
+    own: { ...previous?.own },
   };
 }
 
@@ -874,7 +892,7 @@ function pruneEdits(state: State, events: Events, withdrawn: Set<string>): void 
   state.edits = Object.fromEntries(Object.entries(state.edits).filter(([edited]) => !withdrawn.has(edited)));
 }
 
-type RecordContext = { state: State; userId: string; token: string; messenger: Messenger; homeserver: HomeserverClient; serverName: string };
+type RecordContext = { state: State; userId: string; token: string; messenger: Messenger; homeserver: HomeserverClient; serverName: string; ownSenders: Set<string> };
 
 /** A Source Record of a message, which always has the time its homeserver got it. */
 type MessageRecord = SourceRecord & { occurredAt: string };
@@ -906,6 +924,7 @@ async function recordOf(event: MatrixEvent, roomId: string, context: RecordConte
     attributes: jid === undefined ? [] : [jid],
     // Who sent it, and in which chat, as the Admin area shows it with the message.
     sender: context.state.names[event.sender] ?? event.sender,
+    ...(context.ownSenders.has(event.sender) ? { own: true } : {}),
     subject: context.state.rooms[roomId] ?? roomId,
     content: { kind: "raw-message", text, attachments },
   };
@@ -988,6 +1007,7 @@ function parseState(state: string | null): Previous | null {
       names: recordOrEmpty(parsed.names),
       read: chatsOf(parsed.read),
       edits: recordOrEmpty(parsed.edits),
+      own: recordOrEmpty(parsed.own),
     };
   } catch {
     return null;

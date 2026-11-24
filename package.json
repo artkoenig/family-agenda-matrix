@@ -17,8 +17,8 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@family-agenda/plugin-contract": "github:artkoenig/family-agenda#v0.9.0&path:/packages/plugin-contract",
-    "@family-agenda/plugin-kit": "github:artkoenig/family-agenda#v0.9.0&path:/packages/plugin-kit"
+    "@family-agenda/plugin-contract": "github:artkoenig/family-agenda#5c1fba4&path:/packages/plugin-contract",
+    "@family-agenda/plugin-kit": "github:artkoenig/family-agenda#5c1fba4&path:/packages/plugin-kit"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
