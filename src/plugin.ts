@@ -75,7 +75,7 @@ type State = {
   edits: Record<string, string[]>;
 };
 
-/** How far back a newly allow-listed chat is read, so that a busy group does not bring years of messages. */
+/** How far back a chat is read the first time, so that a busy group does not bring years of messages. */
 const backfillDays = 14;
 
 /** How many events of one room a run reads back at most, through `/messages`. */
@@ -831,22 +831,25 @@ async function collectEvents(
 ): Promise<{ withdrawn: Set<string>; events: Events }> {
   const withdrawn = new Set<string>();
   const events: Events = new Map();
-  // Learns each event, withdraws the redacted, and keeps those of allow-listed rooms.
-  const take = (roomId: string, list: MatrixEvent[]) => {
+  // Learns each event, withdraws the redacted, and keeps those of allow-listed rooms sent at `from` or later.
+  const take = (roomId: string, list: MatrixEvent[], from = -Infinity) => {
     for (const event of list) {
       learn(state, roomId, event);
       if (event.type === "m.room.redaction") {
         const redacts = event.redacts ?? event.content.redacts;
         if (typeof redacts === "string") withdrawn.add(redacts);
-      } else if (allowListed.has(roomId) && event.event_id) {
+      } else if (allowListed.has(roomId) && event.event_id && (event.origin_server_ts ?? 0) >= from) {
         events.set(event.event_id, { roomId, event });
       }
     }
   };
 
   for (const [roomId, room] of Object.entries(sync.rooms?.join ?? {})) {
-    take(roomId, room.timeline?.events ?? []);
-    const isNew = previous !== null && !previous.read.includes(roomId);
+    // The timeline of a chat not read before goes back as far as it is long; one read before is
+    // taken whole, so that nothing is lost however long the last run is ago.
+    const firstRead = !previous?.read.includes(roomId);
+    take(roomId, room.timeline?.events ?? [], firstRead ? backfillStart : undefined);
+    const isNew = previous !== null && firstRead;
     // A timeline cut short since the last run is read back to where that run stopped.
     if (allowListed.has(roomId) && !isNew && room.timeline?.limited && room.timeline.prev_batch) {
       take(roomId, await readBack(homeserver, token, roomId, room.timeline.prev_batch, previous?.since ?? null, backfillStart));
