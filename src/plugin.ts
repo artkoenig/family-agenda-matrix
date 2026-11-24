@@ -38,6 +38,12 @@ export type MatrixPluginOptions = {
    * Admin: it is misconfigured, or keeps crashing.
    */
   failingAfterMs?: number;
+  /** How often the invitations to the chats of an account just linked are accepted. */
+  loadEveryMs?: number;
+  /** After how long without a new chat the chats of an account just linked count as loaded: the bridge does not say so. */
+  quietMs?: number;
+  /** How long loading the chats of an account just linked may take; later ones are joined by the polls. */
+  loadAtMostMs?: number;
 };
 
 /** The plugin's own version: that of package.json, raised with each release. */
@@ -93,8 +99,8 @@ const workingStates = new Set(["CONNECTED", "BACKFILLING", "CONNECTING", "TRANSI
 /** Login states that need an Admin to link the account again. */
 const loggedOutStates = new Set(["LOGGED_OUT", "BAD_CREDENTIALS"]);
 
-/** A QR code login going on for a Matrix user, kept while the Admin area polls it. */
-type LoginSession = { qrCode: string | null; outcome: "waiting" | "done" | { failed: PluginText } };
+/** A QR code login going on for a Matrix user, kept while the Admin area polls it: its code, then how many groups are joined. */
+type LoginSession = { qrCode: string | null; groups: number; outcome: "waiting" | "loading" | "done" | "expired" | { failed: PluginText } };
 
 /** Whether a bridge's companion answers, does not exist on the Instance, or does not answer yet. */
 type Reachability = "up" | "missing" | "down";
@@ -116,6 +122,10 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
   const failingAfterMs = options.failingAfterMs ?? 10 * 60_000;
   /** Since when each companion, by Messenger id or `homeserver`, has not answered. */
   const failingSince = new Map<string, number>();
+
+  const loadEveryMs = options.loadEveryMs ?? 2_000;
+  const quietMs = options.quietMs ?? 20_000;
+  const loadAtMostMs = options.loadAtMostMs ?? 2 * 60_000;
 
   /** Notes that a companion did not answer; whether it has not for longer than `failingAfterMs`. */
   function failingTooLong(companion: string): boolean {
@@ -170,8 +180,8 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     return { messenger, bridge };
   }
 
-  /** Fails the run unless the bridge has a working login for the Source's account. */
-  async function checkLogin(bridge: BridgeClient, messenger: Messenger, userId: string): Promise<void> {
+  /** Whether the account is linked; fails the run when its login does not work, or is gone from a Source that has read. */
+  async function checkLogin(bridge: BridgeClient, messenger: Messenger, userId: string, hasRead: boolean): Promise<boolean> {
     let logins;
     try {
       logins = await bridge.logins(userId);
@@ -180,14 +190,18 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       log(`The ${messenger.attributeValue} bridge refused to list the logins:`, error);
       throw new PluginError("temporary", `The ${messenger.attributeValue} bridge could not be reached.`);
     }
+    if (logins.length === 0 && !hasRead) return false;
     loginStateProblem(logins, messenger.attributeValue, log);
+    return true;
   }
 
   async function poll(context: RunContext): Promise<IngestResult> {
     const { messenger, bridge } = await bridgeOf(context.config.plain);
     const { userId, token } = accountOf(context.config);
-    await checkLogin(bridge, messenger, userId);
     const previous = parseState(context.syncCursor);
+    if (!(await checkLogin(bridge, messenger, userId, previous !== null))) {
+      return { sourceRecords: [], syncCursor: context.syncCursor, settingUp: notLinked(messenger) };
+    }
     const backfillStart = new Date(context.now).getTime() - backfillDays * 24 * 60 * 60 * 1000;
     const serverName = instance.homeserver.serverName;
 
@@ -207,9 +221,56 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       pruneEdits(state, events, withdrawn);
 
       const sourceRecords = await recordsOf(events, withdrawn, { state, userId, token, messenger, homeserver, serverName });
-      return { sourceRecords, syncCursor: JSON.stringify(state), ...(withdrawn.size > 0 ? { withdrawn: [...withdrawn] } : {}), attributes };
+      return { sourceRecords, syncCursor: JSON.stringify(state), ...(withdrawn.size > 0 ? { withdrawn: [...withdrawn] } : {}), attributes, ...loadingOf(userId) };
     } catch (error) {
       throw homeserverError(error, log);
+    }
+  }
+
+  /** What a run and the chats to choose say while the chats of an account just linked load. */
+  function loadingOf(userId: string): { settingUp?: PluginText } {
+    const session = sessions.get(userId);
+    return session?.outcome === "loading" ? { settingUp: loading(session.groups) } : {};
+  }
+
+  /** The chats to choose; that they are not known yet before a first run and while they load. */
+  function choicesOf(context: RunContext): EndpointResponse<"fieldChoices"> {
+    const { userId } = accountOf(context.config);
+    const choices = chatChoices(context);
+    if (sessions.get(userId)?.outcome === "loading") return { choices, ...loadingOf(userId) };
+    return parseState(context.syncCursor) ? { choices } : { choices, settingUp: chatsFollow };
+  }
+
+  /**
+   * Accepts the bridge's invitations to the chats of an account just linked as they arrive, until
+   * none has for a while. A failure is left to the polls, which accept them too and report it.
+   */
+  async function loadChats(userId: string, token: string, session: LoginSession, messenger: Messenger): Promise<void> {
+    const bridge = { userId, messenger, serverName: instance.homeserver.serverName };
+    const started = Date.now();
+    let lastNew = started;
+    session.outcome = "loading";
+    try {
+      while (sessions.get(userId) === session && Date.now() - lastNew < quietMs && Date.now() - started < loadAtMostMs) {
+        const pending = Object.keys(invitationsOf(await homeserver.invites(token), bridge));
+        if (pending.length > 0) lastNew = Date.now();
+        for (const roomId of pending) if (await joinsGroup(token, roomId)) session.groups += 1;
+        await sleep(loadEveryMs);
+      }
+    } catch (error) {
+      log("The chats could not be loaded:", error);
+    }
+    session.outcome = "done";
+  }
+
+  /** Joins a chat; whether it is a group. A join refused now, such as past the rate limit, is tried again. */
+  async function joinsGroup(token: string, roomId: string): Promise<boolean> {
+    try {
+      await homeserver.join(token, roomId);
+      return isGroup(await homeserver.state(token, roomId));
+    } catch (error) {
+      if (error instanceof RefusedError) return false;
+      throw error;
     }
   }
 
@@ -221,16 +282,18 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
       return notYet(error, messengerOf(context.config.plain.messenger));
     }
     const { messenger, bridge } = connection;
-    const { userId } = accountOf(context.config);
+    const { userId, token } = accountOf(context.config);
     const session = sessions.get(userId);
-    if (session) return sessionProgress(userId, session, messenger);
-    return startLoginOrExplain(bridge, userId, messenger);
+    // A QR code nobody scanned is no failure: a new one takes its place.
+    if (session && session.outcome !== "expired") return sessionProgress(userId, session, session.outcome, messenger);
+    sessions.delete(userId);
+    return startLoginOrExplain(bridge, userId, token, messenger);
   }
 
   /** The first step of a login; why it could not start when the bridge does not answer or refuses. */
-  async function startLoginOrExplain(bridge: BridgeClient, userId: string, messenger: Messenger): Promise<SetupProgress> {
+  async function startLoginOrExplain(bridge: BridgeClient, userId: string, token: string, messenger: Messenger): Promise<SetupProgress> {
     try {
-      return await startLogin(bridge, userId, messenger);
+      return await startLogin(bridge, userId, token, messenger);
     } catch (error) {
       if (!(error instanceof RefusedError)) return notYet(await unavailable(messenger), messenger);
       log(`The ${messenger.attributeValue} bridge refused to start a login:`, error);
@@ -239,23 +302,24 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
   }
 
   /** How the login in progress stands; one that ended is reported once and forgotten. */
-  function sessionProgress(userId: string, session: LoginSession, messenger: Messenger): SetupProgress {
-    if (session.outcome === "waiting") return waiting(messenger, session.qrCode);
+  function sessionProgress(userId: string, session: LoginSession, outcome: Exclude<LoginSession["outcome"], "expired">, messenger: Messenger): SetupProgress {
+    if (outcome === "waiting") return waiting(messenger, session.qrCode);
+    if (outcome === "loading") return { status: "waiting", message: loading(session.groups) };
     sessions.delete(userId);
-    if (session.outcome === "done") return { status: "done", message: linked(messenger) };
-    return { status: "failed", message: session.outcome.failed };
+    if (outcome === "done") return { status: "done", message: linked(messenger) };
+    return { status: "failed", message: outcome.failed };
   }
 
-  async function startLogin(bridge: BridgeClient, userId: string, messenger: Messenger): Promise<SetupProgress> {
+  async function startLogin(bridge: BridgeClient, userId: string, token: string, messenger: Messenger): Promise<SetupProgress> {
     if ((await bridge.logins(userId)).some((login) => workingStates.has(login.stateEvent))) {
       return { status: "done", message: linked(messenger) };
     }
     const step = await bridge.startLogin(userId, messenger.qrLoginFlow);
     if (step.type === "complete") return { status: "done", message: linked(messenger) };
     if (step.type !== "display_and_wait") return { status: "failed", message: unexpectedStep(step, messenger, log) };
-    const started: LoginSession = { qrCode: step.qrCode, outcome: "waiting" };
+    const started: LoginSession = { qrCode: step.qrCode, groups: 0, outcome: "waiting" };
     sessions.set(userId, started);
-    void awaitScan(bridge, userId, step, started, messenger, log);
+    void awaitScan(bridge, userId, step, started, messenger, log).then((scanned) => (scanned ? loadChats(userId, token, started, messenger) : undefined));
     return waiting(messenger, started.qrCode);
   }
 
@@ -384,7 +448,7 @@ export function createMatrixPlugin(options: MatrixPluginOptions): PluginImplemen
     }),
     fieldChoices: guarded("fieldChoices", async ({ field, context }) => {
       if (field !== "chats") throw new PluginError("definite", "This field offers no choices.");
-      return { choices: chatChoices(context) };
+      return choicesOf(context);
     }),
     catalogueEntries: guarded("catalogueEntries", catalogueEntries),
     sourceAdded: guarded("sourceAdded", sourceAdded),
@@ -448,7 +512,7 @@ function starting(messenger: Messenger): PluginText {
   };
 }
 
-/** Waits for the QR code to be scanned in the background, showing each new code the bridge sends. */
+/** Waits for the QR code to be scanned in the background, showing each new code the bridge sends; whether it was. */
 async function awaitScan(
   bridge: BridgeClient,
   userId: string,
@@ -456,26 +520,32 @@ async function awaitScan(
   session: LoginSession,
   messenger: Messenger,
   log: (message: string, error: unknown) => void,
-): Promise<void> {
+): Promise<boolean> {
   let step = first;
   try {
     for (;;) {
       const next = await bridge.waitForStep(userId, step);
       if (next.type === "complete") {
-        session.outcome = "done";
-        return;
+        return true;
       }
       if (next.type !== "display_and_wait") {
         session.outcome = { failed: unexpectedStep(next, messenger, log) };
-        return;
+        return false;
       }
       session.qrCode = next.qrCode;
       step = next;
     }
   } catch (error) {
     log("The login did not finish:", error);
-    session.outcome = { failed: { en: "The login did not finish. Try again.", de: "Die Verknüpfung wurde nicht abgeschlossen. Versuche es noch einmal." } };
+    session.outcome = isTimeout(error) ? "expired" : { failed: { en: "The login did not finish. Try again.", de: "Die Verknüpfung wurde nicht abgeschlossen. Versuche es noch einmal." } };
+    return false;
   }
+}
+
+/** Whether nobody scanned the QR code in time, by the bridge's error code or the plugin's own limit. */
+function isTimeout(error: unknown): boolean {
+  if (error instanceof RefusedError) return error.errcode?.endsWith("TIMEOUT") === true;
+  return error instanceof Error && error.name === "TimeoutError";
 }
 
 /** A login step the plugin cannot show, such as one asking for a phone number: its instructions go to the log only. */
@@ -494,6 +564,25 @@ function waiting(messenger: Messenger, qrCode: string | null): SetupProgress {
 
 function linked(messenger: Messenger): PluginText {
   return { en: `The ${messenger.attributeValue} account is linked.`, de: `Das ${messenger.attributeValue}-Konto ist verknüpft.` };
+}
+
+function notLinked(messenger: Messenger): PluginText {
+  return { en: `The ${messenger.attributeValue} account is not linked yet.`, de: `Das ${messenger.attributeValue}-Konto ist noch nicht verknüpft.` };
+}
+
+/** Before a first run knows any chat. */
+const chatsFollow: PluginText = {
+  en: "The chats appear here once the account is linked and its chats are loaded.",
+  de: "Die Chats erscheinen hier, sobald das Konto verknüpft ist und seine Chats geladen sind.",
+};
+
+/** That an account is linked and its chats still arrive, with the groups joined so far. */
+function loading(groups: number): PluginText {
+  if (groups === 0) return { en: "Linked. Loading chats …", de: "Verknüpft. Chats werden geladen …" };
+  return {
+    en: `Linked. Loading chats … (${groups} ${groups === 1 ? "group" : "groups"})`,
+    de: `Verknüpft. Chats werden geladen … (${groups} ${groups === 1 ? "Gruppe" : "Gruppen"})`,
+  };
 }
 
 /** The fields of the sync cursor carried over, each spread so the run mutates its own copy. */
