@@ -417,6 +417,49 @@ describe("chats", () => {
     expect(third.sourceRecords).toEqual([]);
   });
 
+  it("are read back for two weeks by a first run that finds them allow-listed", async () => {
+    homeserver.addMember(room, userOf(config));
+    homeserver.text(room, sender, "Vor drei Wochen: Schulfest.", new Date(now.getTime() - 21 * days));
+    homeserver.text(room, sender, "Vor genau zwei Wochen: Elternabend.", new Date(now.getTime() - 14 * days));
+    homeserver.text(room, sender, "Vor einer Woche: Wandertag.", new Date(now.getTime() - 7 * days));
+
+    const { sourceRecords } = await poll(allowListing(config, jid));
+
+    expect(sourceRecords.map(textOf)).toEqual(["Vor genau zwei Wochen: Elternabend.", "Vor einer Woche: Wandertag."]);
+  });
+
+  it("are read back for two weeks when their history arrives with the run that first reads them", async () => {
+    const first = await poll(config);
+    homeserver.text(room, sender, "Vor drei Wochen: Schulfest.", new Date(now.getTime() - 21 * days));
+    homeserver.text(room, sender, "Vor einer Woche: Wandertag.", new Date(now.getTime() - 7 * days));
+
+    const { sourceRecords } = await poll(allowListing(config, jid), first.syncCursor);
+
+    expect(sourceRecords.map(textOf)).toEqual(["Vor einer Woche: Wandertag."]);
+  });
+
+  it("withdraw a message redacted more than two weeks before a first run", async () => {
+    homeserver.addMember(room, userOf(config));
+    const message = homeserver.text(room, sender, "Vor drei Wochen: Schulfest.", new Date(now.getTime() - 21 * days));
+    homeserver.redact(room, message, new Date(now.getTime() - 20 * days));
+
+    const { sourceRecords, withdrawn } = await poll(allowListing(config, jid));
+
+    expect(sourceRecords).toEqual([]);
+    expect(withdrawn).toEqual([message]);
+  });
+
+  it("lose no message of a chat read before when the plugin was away for more than two weeks", async () => {
+    homeserver.addMember(room, userOf(config));
+    const first = await poll(allowListing(config, jid));
+    homeserver.text(room, sender, "Am Tag danach: Schulfest.", new Date(now.getTime() + 1 * days));
+    homeserver.text(room, sender, "Nach drei Wochen: Wandertag.", new Date(now.getTime() + 21 * days));
+
+    const { sourceRecords } = await poll(allowListing(config, jid), first.syncCursor, plugin(), new Date(now.getTime() + 30 * days));
+
+    expect(sourceRecords.map(textOf)).toEqual(["Am Tag danach: Schulfest.", "Nach drei Wochen: Wandertag."]);
+  });
+
   it("are read back when the timeline since the last run was cut short", async () => {
     const first = await poll(allowListing(config, jid));
     for (let message = 1; message <= 60; message++) {
